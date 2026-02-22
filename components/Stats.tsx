@@ -1,14 +1,15 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
 import { useCountUp } from '@/hooks/useCountUp'
 
 const stats = [
-  { value: 10000, suffix: '+', label: 'Active Players', duration: 2 },
-  { value: 50, suffix: '+', label: 'Games Available', duration: 2 },
-  { value: 1000000, suffix: '+', label: 'Matches Played', duration: 2.5 },
-  { value: 99, suffix: '%', label: 'Uptime', duration: 2 },
+  { endValue: 999, suffix: '+', label: 'Active Players', duration: 2 },
+  { endValue: 50, suffix: '+', label: 'Games', duration: 1.5 },
+  { endValue: 9999, suffix: '+', label: 'Matches Played', duration: 2.2 },
+  { endValue: 99, suffix: '%', label: 'Uptime', duration: 1.8 },
 ]
 
 export default function Stats() {
@@ -46,11 +47,19 @@ function StatCard({
   inView,
   delay,
 }: {
-  stat: typeof stats[0]
+  stat: (typeof stats)[0]
   inView: boolean
   delay: number
 }) {
-  const count = useCountUp(stat.value, inView, stat.duration)
+  const count = useCountUp(stat.endValue, inView, stat.duration)
+  const [showComingSoon, setShowComingSoon] = useState(false)
+
+  useEffect(() => {
+    if (!inView) return
+    const ms = (delay + stat.duration) * 1000
+    const t = setTimeout(() => setShowComingSoon(true), ms)
+    return () => clearTimeout(t)
+  }, [inView, delay, stat.duration])
 
   return (
     <motion.div
@@ -60,9 +69,22 @@ function StatCard({
       transition={{ duration: 0.5, delay }}
       whileHover={{ scale: 1.05, y: -5 }}
     >
-      <div className="text-4xl md:text-5xl font-bold mb-2 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-        {count.toLocaleString()}
-        {stat.suffix}
+      <div className="text-4xl md:text-5xl font-bold mb-2 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent min-h-[3rem] flex items-center justify-center">
+        {showComingSoon ? (
+          <motion.span
+            className="text-base sm:text-lg md:text-xl"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.3 }}
+          >
+            Coming soon
+          </motion.span>
+        ) : (
+          <span>
+            {count.toLocaleString()}
+            {stat.suffix}
+          </span>
+        )}
       </div>
       <div className="text-gray-400 text-sm md:text-base">{stat.label}</div>
     </motion.div>

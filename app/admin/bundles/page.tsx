@@ -102,7 +102,7 @@ export default function AdminBundlesPage() {
     setLoading(true);
     setError('');
     try {
-      const data = await callRpc('store/get_bundles', '{}');
+      const data = await callRpc('store/get_bundles', '{}') as { data?: { bundles?: Bundle[] }; bundles?: Bundle[] };
       const d = data?.data ?? data;
       setBundles(d?.bundles ?? []);
     } catch (e) {

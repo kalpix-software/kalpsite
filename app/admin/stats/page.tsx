@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { callAdminRpc } from '@/lib/admin-rpc';
 
 const callRpc = callAdminRpc;
@@ -21,14 +21,14 @@ export default function AdminStatsPage() {
   const [totals, setTotals] = useState({ totalCoins: 0, totalGems: 0, totalItems: 0 });
   const [categoryFilter, setCategoryFilter] = useState('');
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
       const data = await callRpc('store/admin_get_item_stats', JSON.stringify({
         category: categoryFilter || undefined,
         limit: 100,
-      }));
+      })) as { data?: { items?: ItemStat[]; totalCoins?: number; totalGems?: number; totalItems?: number }; items?: ItemStat[]; totalCoins?: number; totalGems?: number; totalItems?: number };
       const d = data?.data ?? data;
       setStats(d?.items ?? []);
       setTotals({
@@ -41,9 +41,9 @@ export default function AdminStatsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [categoryFilter]);
 
-  useEffect(() => { load(); }, [categoryFilter]);
+  useEffect(() => { load(); }, [load]);
 
   return (
     <div>

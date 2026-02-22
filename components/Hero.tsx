@@ -111,25 +111,25 @@ export default function Hero() {
 
         <ComingSoonModal open={showComingSoon} onClose={() => setShowComingSoon(false)} />
 
-        {/* Stats Preview */}
+        {/* Pre-launch: no fake stats */}
         <motion.div
           variants={itemVariants}
           className="mt-20 grid grid-cols-3 gap-8 max-w-2xl mx-auto"
         >
           {[
-            { number: '10K+', label: 'Active Players' },
-            { number: '50+', label: 'Games' },
-            { number: '1M+', label: 'Matches Played' },
-          ].map((stat, index) => (
+            { display: 'Tero Card', label: 'Coming soon' },
+            { display: 'Puzzle Master', label: 'Coming soon' },
+            { display: 'More games', label: 'On the way' },
+          ].map((item, index) => (
             <motion.div
               key={index}
               className="text-center"
               whileHover={{ scale: 1.1 }}
             >
-              <div className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-                {stat.number}
+              <div className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+                {item.display}
               </div>
-              <div className="text-sm text-gray-400 mt-2">{stat.label}</div>
+              <div className="text-sm text-gray-400 mt-2">{item.label}</div>
             </motion.div>
           ))}
         </motion.div>

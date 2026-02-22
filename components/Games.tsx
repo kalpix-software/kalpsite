@@ -73,12 +73,12 @@ export default function Games() {
               className="rounded-2xl bg-slate-800/50 backdrop-blur-sm border border-slate-700 overflow-hidden hover:border-slate-600 transition-all"
             >
               <div className="flex flex-col md:flex-row">
-                <div className="relative w-full md:w-2/5 min-h-[220px] md:min-h-0 md:aspect-[4/3] bg-slate-900/50">
+                <div className="relative w-full md:w-2/5 min-h-[220px] md:min-h-0 md:aspect-[4/3] bg-slate-900/50 flex items-center justify-center">
                   <Image
                     src={game.image}
                     alt={game.title}
                     fill
-                    className="object-cover object-center"
+                    className="object-contain object-center"
                     sizes="(max-width: 768px) 100vw, 40vw"
                     priority={index === 0}
                   />

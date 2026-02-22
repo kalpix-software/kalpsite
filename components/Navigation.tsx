@@ -44,12 +44,12 @@ export default function Navigation() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-20">
           {/* Logo */}
-          <Link
-            href="/"
-            className="flex items-center space-x-2 group"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-          >
+          <Link href="/" className="flex items-center space-x-2 group">
+            <motion.span
+              className="flex items-center space-x-2"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
             <div className="relative">
               <Gamepad2 className="w-8 h-8 text-blue-400 group-hover:text-blue-300 transition-colors" />
               <motion.div
@@ -68,6 +68,7 @@ export default function Navigation() {
             <span className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
               Kalpix Games
             </span>
+            </motion.span>
           </Link>
 
           {/* Desktop Navigation */}

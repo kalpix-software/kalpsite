@@ -374,7 +374,7 @@ export default function AdminStorePage() {
         limit: pageSize,
         offset,
       });
-      const data = await callRpc('store/get_items', payload);
+      const data = await callRpc('store/get_items', payload) as { data?: { items?: StoreItem[]; total?: number }; items?: StoreItem[]; total?: number };
       const raw = data?.data ?? data;
       const list = raw?.items ?? [];
       const totalCount = typeof raw?.total === 'number' ? raw.total : list.length;

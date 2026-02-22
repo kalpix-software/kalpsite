@@ -115,8 +115,8 @@ export default function AdminAvatarsPage() {
     setListLoading(true);
     setListError(null);
     try {
-      const data = await callRpc('avatar/admin_list_avatars', '{}');
-      const raw = (data as { data?: { avatars?: AvatarListItem[] }; avatars?: AvatarListItem[] })?.data ?? data;
+      const data = await callRpc('avatar/admin_list_avatars', '{}') as { data?: { avatars?: AvatarListItem[] }; avatars?: AvatarListItem[] };
+      const raw = data?.data ?? data;
       const avatars = raw?.avatars ?? [];
       setListAvatars(Array.isArray(avatars) ? avatars : []);
     } catch (e) {
@@ -172,7 +172,7 @@ export default function AdminAvatarsPage() {
 
   const saveToDatabase = async () => {
     if (!parsed || priceRows.length === 0) {
-      setSaveStatus({ error: 'Parse a catalog first, then save.' });
+      setSaveStatus({ loading: false, error: 'Parse a catalog first, then save.' });
       return;
     }
     setSaveStatus({ loading: true });
