@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Navigation from '@/components/Navigation'
 import Hero from '@/components/Hero'
 import Features from '@/components/Features'
+import Games from '@/components/Games'
 import About from '@/components/About'
 import Stats from '@/components/Stats'
 import CTA from '@/components/CTA'
@@ -27,6 +28,7 @@ export default function Home() {
       <Navigation />
       <Hero />
       <Features />
+      <Games />
       <Stats />
       <About />
       <CTA />

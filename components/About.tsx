@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { motion } from "framer-motion";
 import { useInView } from "react-intersection-observer";
 import { Target, Heart, Rocket } from "lucide-react";
@@ -99,9 +100,12 @@ export default function About() {
 					<p className="text-lg text-gray-300 max-w-4xl mx-auto leading-relaxed">
 						Kalpix Games is more than just a gaming platform—it&apos;s a
 						community where friendships are forged, skills are honed, and
-						unforgettable moments are created. Built with cutting-edge
-						technology and a passion for gaming, we&apos;re committed to
-						delivering the best social gaming experience possible.
+						unforgettable moments are created. We&apos;re built by{' '}
+						<strong className="text-white">Kalpix Software Private Limited</strong>, a company
+						incorporated in India and committed to transparency and fair play.
+					</p>
+					<p className="text-gray-400 mt-4">
+						<Link href="/about" className="text-blue-400 hover:text-blue-300 transition-colors underline">Full company details, directors, and registered office →</Link>
 					</p>
 				</motion.div>
 			</div>

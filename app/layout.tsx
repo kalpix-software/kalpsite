@@ -5,9 +5,9 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Kalpix Games - Social Gaming Platform',
-  description: 'Join the ultimate social gaming experience with Kalpix Games. Play, connect, and compete with friends.',
-  keywords: 'social gaming, multiplayer games, gaming platform, kalpix',
+  title: 'Kalpix Games - Social Gaming Platform | Kalpix Software Private Limited',
+  description: 'Play Tero Card, Puzzle Master, and more. Kalpix Games is the social gaming platform by Kalpix Software Private Limited. Play, connect, and compete with friends.',
+  keywords: 'Kalpix Games, social gaming, multiplayer games, Tero Card, Puzzle Master, Kalpix Software Private Limited',
 }
 
 export default function RootLayout({

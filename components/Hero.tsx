@@ -1,10 +1,13 @@
 'use client'
 
+import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
 import { ArrowRight, Play, Sparkles } from 'lucide-react'
+import ComingSoonModal from '@/components/ComingSoonModal'
 
 export default function Hero() {
+  const [showComingSoon, setShowComingSoon] = useState(false)
   const [ref, inView] = useInView({
     triggerOnce: true,
     threshold: 0.1,
@@ -86,6 +89,7 @@ export default function Hero() {
           className="flex flex-col sm:flex-row items-center justify-center gap-4"
         >
           <motion.button
+            onClick={() => setShowComingSoon(true)}
             className="group px-8 py-4 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full text-white font-semibold text-lg flex items-center space-x-2 hover:shadow-2xl hover:shadow-blue-500/50 transition-all"
             whileHover={{ scale: 1.05, y: -2 }}
             whileTap={{ scale: 0.95 }}
@@ -95,6 +99,7 @@ export default function Hero() {
           </motion.button>
 
           <motion.button
+            onClick={() => setShowComingSoon(true)}
             className="px-8 py-4 bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-full text-white font-semibold text-lg flex items-center space-x-2 hover:bg-slate-700/50 transition-all"
             whileHover={{ scale: 1.05, y: -2 }}
             whileTap={{ scale: 0.95 }}
@@ -103,6 +108,8 @@ export default function Hero() {
             <span>Watch Demo</span>
           </motion.button>
         </motion.div>
+
+        <ComingSoonModal open={showComingSoon} onClose={() => setShowComingSoon(false)} />
 
         {/* Stats Preview */}
         <motion.div

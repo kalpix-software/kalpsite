@@ -86,7 +86,7 @@ export default function ParticleBackground() {
 			id="tsparticles"
 			init={particlesInit}
 			options={options}
-			className="absolute inset-0 z-0"
+			className="absolute inset-0 z-0 pointer-events-none"
 		/>
 	);
 }
