@@ -1,8 +1,6 @@
-'use client'
-
-import { motion } from 'framer-motion'
 import Link from 'next/link'
 import PublicPageLayout from '@/components/PublicPageLayout'
+import FadeIn from '@/components/FadeIn'
 
 const sections = [
   { title: '1. What are cookies', content: 'Cookies are small text files stored on your device when you visit a website. They help the site remember your preferences, keep you logged in, and understand how the site is used. We use cookies and similar technologies (e.g. local storage) to provide and improve Kalpix Games and our website.' },
@@ -16,7 +14,7 @@ export default function CookiesPage() {
   return (
     <PublicPageLayout>
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+        <FadeIn>
           <h1 className="text-4xl md:text-5xl font-bold mb-4 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
             Cookie Policy
           </h1>
@@ -37,7 +35,7 @@ export default function CookiesPage() {
           <div className="mt-12 text-center">
             <Link href="/" className="text-blue-400 hover:text-blue-300 transition-colors">← Back to home</Link>
           </div>
-        </motion.div>
+        </FadeIn>
       </div>
     </PublicPageLayout>
   )

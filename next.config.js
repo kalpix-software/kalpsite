@@ -2,8 +2,15 @@
 const nextConfig = {
   reactStrictMode: true,
   images: {
-    domains: ['kalpixsoftware.com'],
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'kalpixsoftware.com',
+      },
+    ],
   },
+  poweredByHeader: false,
+  compress: true,
 }
 
 module.exports = nextConfig

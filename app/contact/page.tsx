@@ -1,8 +1,6 @@
-'use client'
-
-import { motion } from 'framer-motion'
 import Link from 'next/link'
 import PublicPageLayout from '@/components/PublicPageLayout'
+import FadeIn from '@/components/FadeIn'
 import { Mail, MapPin, Building2 } from 'lucide-react'
 
 const company = {
@@ -15,11 +13,7 @@ export default function ContactPage() {
   return (
     <PublicPageLayout>
       <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-        >
+        <FadeIn>
           <h1 className="text-4xl md:text-5xl font-bold mb-4 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
             Contact Us
           </h1>
@@ -67,7 +61,7 @@ export default function ContactPage() {
               ← Back to home
             </Link>
           </div>
-        </motion.div>
+        </FadeIn>
       </div>
     </PublicPageLayout>
   )

@@ -1,8 +1,6 @@
-'use client'
-
-import { motion } from 'framer-motion'
 import Link from 'next/link'
 import PublicPageLayout from '@/components/PublicPageLayout'
+import FadeIn from '@/components/FadeIn'
 
 export default function TermsPage() {
   const sections = [
@@ -19,7 +17,7 @@ export default function TermsPage() {
   return (
     <PublicPageLayout>
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+        <FadeIn>
           <h1 className="text-4xl md:text-5xl font-bold mb-4 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">Terms of Service</h1>
           <p className="text-gray-400 mb-2">Last updated: December 2025</p>
           <p className="text-gray-400 mb-12">Please read these Terms of Service carefully before using Kalpix Games.</p>
@@ -34,7 +32,7 @@ export default function TermsPage() {
           <div className="mt-12 text-center">
             <Link href="/" className="text-blue-400 hover:text-blue-300 transition-colors">← Back to home</Link>
           </div>
-        </motion.div>
+        </FadeIn>
       </div>
     </PublicPageLayout>
   )

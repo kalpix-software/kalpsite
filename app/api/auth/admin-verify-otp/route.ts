@@ -1,16 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { serverRpc } from '@/lib/nakama';
-import { AUTH_COOKIE_NAME, authCookieOptions } from '@/lib/auth-cookie';
+import { AUTH_COOKIE_NAME, authCookieOptions, validateOrigin } from '@/lib/auth-cookie';
 
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
 /**
- * Verify OTP for admin registration. Uses the existing auth/verify_registration_otp RPC with http_key
- * (unauthenticated flow). Requires email, otp, and registrationId from the client.
+ * Verify OTP for admin registration. Uses auth/verify_registration_otp via Nginx (no http_key).
  * Backend sets is_admin in metadata when email matches ADMIN_EMAIL.
  */
 export async function POST(req: NextRequest) {
   try {
+    if (!validateOrigin(req)) {
+      return NextResponse.json({ error: 'Invalid origin' }, { status: 403, headers: NO_STORE });
+    }
     const body = await req.json();
     const email = body.email?.trim();
     const otp = body.otp?.trim();

@@ -1,15 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { serverRpc } from '@/lib/nakama';
+import { validateOrigin } from '@/lib/auth-cookie';
 
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
 /**
- * Start admin registration: email + password must match .env. Calls the existing
- * auth/register_email RPC with http_key (unauthenticated flow). Backend sends OTP and
- * returns registrationId. When the user verifies, backend sets is_admin if email matches ADMIN_EMAIL.
+ * Start admin registration: email + password must match .env. Calls auth/register_email
+ * via Nginx (no http_key on this server). Backend sends OTP and returns registrationId.
  */
 export async function POST(req: NextRequest) {
   try {
+    if (!validateOrigin(req)) {
+      return NextResponse.json({ error: 'Invalid origin' }, { status: 403, headers: NO_STORE });
+    }
     const body = await req.json();
     const email = body.email?.trim();
     const password = body.password;
