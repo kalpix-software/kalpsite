@@ -41,10 +41,9 @@ export default function AdminRewardsPage() {
     setLoading(true);
     setError('');
     try {
-      const res = (await callAdminRpc('store/get_daily_rewards')) as {
-        data?: DailyRewardsData;
-      } & DailyRewardsData;
-      setData(res?.data ?? res);
+      const raw = await callAdminRpc('store/get_daily_rewards');
+      const rewardsData = (raw.data ?? raw) as unknown as DailyRewardsData;
+      setData(rewardsData);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load rewards');
     } finally {

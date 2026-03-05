@@ -72,10 +72,9 @@ export default function AdminBattlePassPage() {
     setLoading(true);
     setError('');
     try {
-      const res = (await callAdminRpc('store/get_current_season')) as {
-        data?: SeasonData;
-      } & SeasonData;
-      setData(res?.data ?? res);
+      const raw = await callAdminRpc('store/get_current_season');
+      const seasonData = (raw.data ?? raw) as unknown as SeasonData;
+      setData(seasonData);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed';
       if (msg.includes('No active season')) {

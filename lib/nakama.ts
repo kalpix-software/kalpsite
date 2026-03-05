@@ -22,19 +22,8 @@ export interface AuthResult {
 }
 
 const NAKAMA_URL = process.env.NAKAMA_URL || 'http://127.0.0.1:80';
-const NAKAMA_SERVER_KEY = process.env.NAKAMA_SERVER_KEY || 'defaultkey';
 /** Base URL for unauthenticated auth RPCs (Nginx adds http_key). Use Nginx entry (e.g. http://localhost for port 80). */
 const AUTH_PROXY_URL = process.env.AUTH_PROXY_URL || 'http://localhost';
-
-/** Validate a game session token by calling the game API /v2/account. */
-export async function validateGameSession(token: string): Promise<boolean> {
-  const url = `${NAKAMA_URL.replace(/\/$/, '')}/v2/account`;
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  return res.ok;
-}
 
 /** Normalize API error to a string (backend may return error as { code, message }). */
 function errorMessage(data: unknown, fallback: string): string {
@@ -123,29 +112,4 @@ export async function serverRpc(rpcId: string, payload: Record<string, unknown>)
     throw new Error(errorMessage(data.error, 'RPC returned success: false'));
   }
   return data.data ?? data;
-}
-
-/** Game API RPC (Bearer = game session token). Kept for non-admin use if needed. */
-export async function rpc(session: string, rpcId: string, payload: string = ''): Promise<unknown> {
-  const res = await fetch(`${NAKAMA_URL}/v2/rpc/${rpcId}?unwrap`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${session}`,
-    },
-    body: JSON.stringify(payload || ''),
-  });
-  if (!res.ok) {
-    const err: NakamaErrorBody = await res.json().catch(() => ({}));
-    throw new Error(err.message || `RPC failed: ${res.status}`);
-  }
-  const data: NakamaRpcResponse = await res.json();
-  if (data && typeof data.payload === 'string') {
-    try {
-      return JSON.parse(data.payload);
-    } catch {
-      return data;
-    }
-  }
-  return data;
 }
