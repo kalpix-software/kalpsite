@@ -9,7 +9,7 @@ This document describes what each page in Kalpsite does and how to log in (inclu
 ### **`/` (Home)**
 
 - **URL:** `http://localhost:3000/` (or your deployed URL)
-- **What it does:** Main marketing/landing site for Kalpix Games.
+- **What it does:** Main marketing/landing site for Kalpix.
 - **Contents:** Navigation, Hero, Features, Stats, About, CTA, Footer, and a particle background. No login required.
 
 ---

@@ -1,6 +1,6 @@
-# Kalpsite - Kalpix Games Website
+# Kalpsite - Kalpix Website
 
-A beautiful, modern Next.js website for Kalpix Games social gaming platform.
+A beautiful, modern Next.js website for Kalpix, a social platform with skill-based 2D experiences, chat, posts, and avatars.
 
 ## Features
 
@@ -97,4 +97,4 @@ npm start
 
 ## License
 
-© 2024 Kalpix Games. All rights reserved.
+© 2024 Kalpix. All rights reserved.

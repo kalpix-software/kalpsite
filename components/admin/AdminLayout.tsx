@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard, Store, RefreshCw, LogOut, BarChart3, Package,
   CalendarCheck, Tag, Swords, Trophy, Gift, ChevronDown, ChevronRight,
-  MessageSquare,
+  MessageSquare, Gamepad2,
 } from 'lucide-react';
 
 const SESSION_URL = '/api/auth/session';
@@ -99,6 +99,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       label: 'Overview',
       items: [
         { href: '/admin', label: 'Dashboard', icon: LayoutDashboard },
+        { href: '/admin/play', label: 'Player view (Shop)', icon: Gamepad2 },
         { href: '/admin/stats', label: 'Stats', icon: BarChart3 },
       ],
     },

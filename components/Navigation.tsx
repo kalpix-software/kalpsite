@@ -1,10 +1,11 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Menu, X, Gamepad2 } from 'lucide-react'
+import { Menu, X } from 'lucide-react'
 import ComingSoonModal from '@/components/ComingSoonModal'
 
 export default function Navigation() {
@@ -25,7 +26,7 @@ export default function Navigation() {
   const navItems = [
     { name: 'Home', href: '/' },
     { name: 'Features', href: isHome ? '#features' : '/#features' },
-    { name: 'Games', href: isHome ? '#games' : '/#games' },
+    { name: 'Spaces', href: isHome ? '#games' : '/#games' },
     { name: 'About', href: '/about' },
     { name: 'Contact', href: '/contact' },
   ]
@@ -50,24 +51,18 @@ export default function Navigation() {
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >
-            <div className="relative">
-              <Gamepad2 className="w-8 h-8 text-blue-400 group-hover:text-blue-300 transition-colors" />
-              <motion.div
-                className="absolute inset-0 bg-blue-400 rounded-full blur-xl opacity-50"
-                animate={{
-                  scale: [1, 1.2, 1],
-                  opacity: [0.5, 0.7, 0.5],
-                }}
-                transition={{
-                  duration: 2,
-                  repeat: Infinity,
-                  ease: 'easeInOut',
-                }}
-              />
-            </div>
-            <span className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-              Kalpix Games
-            </span>
+              <div className="relative w-9 h-9 rounded-lg overflow-hidden bg-slate-900/70 border border-slate-700/60">
+                <Image
+                  src="/kalpix_logo_cropped.jpeg"
+                  alt="Kalpix Software logo"
+                  fill
+                  sizes="36px"
+                  className="object-contain"
+                />
+              </div>
+              <span className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+                Kalpix
+              </span>
             </motion.span>
           </Link>
 

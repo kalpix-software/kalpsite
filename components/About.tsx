@@ -10,7 +10,7 @@ const values = [
 		icon: Target,
 		title: "Our Mission",
 		description:
-			"To create the most engaging and inclusive social gaming platform that brings people together through the power of play.",
+			"To create the most engaging and inclusive social platform that brings people together through chat, posts, avatars, and skill-based 2D experiences.",
 		color: "from-blue-500 to-cyan-500",
 	},
 	{
@@ -24,7 +24,7 @@ const values = [
 		icon: Rocket,
 		title: "Our Vision",
 		description:
-			"To be the leading social gaming platform where millions of players connect, compete, and create memories.",
+			"To be the leading social connection platform where millions of people chat, share moments, and enjoy skill-based 2D experiences together.",
 		color: "from-purple-500 to-indigo-500",
 	},
 ];
@@ -49,11 +49,11 @@ export default function About() {
 					transition={{ duration: 0.6 }}
 				>
 					<h2 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-4 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-						About Kalpix Games
+						About Kalpix
 					</h2>
 					<p className="text-xl text-gray-400 max-w-3xl mx-auto">
-						We&apos;re building the future of social gaming, one connection at a
-						time
+						We&apos;re building the future of social connection, one interaction
+						at a time.
 					</p>
 				</motion.div>
 
@@ -98,14 +98,23 @@ export default function About() {
 					transition={{ duration: 0.6, delay: 0.6 }}
 				>
 					<p className="text-lg text-gray-300 max-w-4xl mx-auto leading-relaxed">
-						Kalpix Games is more than just a gaming platform—it&apos;s a
-						community where friendships are forged, skills are honed, and
-						unforgettable moments are created. We&apos;re built by{' '}
-						<strong className="text-white">Kalpix Software Private Limited</strong>, a company
-						incorporated in India and committed to transparency and fair play.
+						Kalpix is more than just an app—it&apos;s a community where
+						friendships are forged, skills are honed through short 2D
+						experiences, and unforgettable moments are created. We&apos;re built
+						by{" "}
+						<strong className="text-white">
+							Kalpix Software Private Limited
+						</strong>
+						, a company incorporated in India and committed to transparency and
+						fair play.
 					</p>
 					<p className="text-gray-400 mt-4">
-						<Link href="/about" className="text-blue-400 hover:text-blue-300 transition-colors underline">Full company details, directors, and registered office →</Link>
+						<Link
+							href="/about"
+							className="text-blue-400 hover:text-blue-300 transition-colors underline"
+						>
+							Full company details, directors, and registered office →
+						</Link>
 					</p>
 				</motion.div>
 			</div>

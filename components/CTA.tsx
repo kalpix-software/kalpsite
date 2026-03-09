@@ -42,12 +42,13 @@ export default function CTA() {
 					</motion.div>
 
 					<h2 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-6 bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
-						Join the Gaming Revolution
+						Join the Kalpix community
 					</h2>
 
 					<p className="text-xl text-gray-300 mb-10 max-w-2xl mx-auto">
-						Start your journey today and experience the future of social gaming.
-						Connect with friends, compete globally, and make every game count.
+						Start your journey today and experience social spaces built around
+						skill-based 2D experiences. Connect with friends, hop into lounges,
+						and discover new people through chat, posts, and avatars.
 					</p>
 
 					<div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -57,7 +58,7 @@ export default function CTA() {
 							whileHover={{ scale: 1.05, y: -2 }}
 							whileTap={{ scale: 0.95 }}
 						>
-							<span>Start Playing Now</span>
+							<span>Get Started</span>
 							<ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
 						</motion.button>
 
@@ -70,7 +71,10 @@ export default function CTA() {
             </motion.button> */}
 					</div>
 
-					<ComingSoonModal open={showComingSoon} onClose={() => setShowComingSoon(false)} />
+					<ComingSoonModal
+						open={showComingSoon}
+						onClose={() => setShowComingSoon(false)}
+					/>
 
 					{/* Trust Indicators */}
 					<motion.div

@@ -53,12 +53,12 @@ export default function Footer() {
 						<Link href="/" className="flex items-center space-x-2 mb-4 group">
 							<Gamepad2 className="w-8 h-8 text-blue-400 group-hover:text-blue-300 transition-colors" />
 							<span className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-								Kalpix Games
+								Kalpix
 							</span>
 						</Link>
 						<p className="text-gray-400 mb-6 max-w-md">
-							The ultimate social gaming platform where friends meet, games come
-							alive, and every moment is a victory.
+							The social hub where friends meet, hang out in lounges, and share
+							skill-based 2D experiences together.
 						</p>
 						<div className="flex space-x-4">
 							{socialLinks.map((social, index) => {
@@ -130,14 +130,17 @@ export default function Footer() {
 				</div>
 
 				{/* Bottom Bar */}
-				<div className="mt-12 pt-8 border-t border-slate-800 flex flex-col md:flex-row justify-between items-center">
+				<div className="mt-12 pt-8 border-t border-slate-800 flex flex-col md:flex-row justify-between items-center gap-3 text-center md:text-left">
 					<p className="text-gray-400 text-sm">
-						© {new Date().getFullYear()} Kalpix Software Private Limited. All
-						rights reserved.
+						© {new Date().getFullYear()} Kalpix Software Private Limited. Kalpix
+						– skill-based casual games &amp; social platform.
 					</p>
-					<p className="text-gray-400 text-sm mt-4 md:mt-0">
-						Kalpix Games — Play. Connect. Compete.
-					</p>
+					{/* <p className="text-gray-400 text-xs md:text-sm max-w-xl">
+						Kalpix offers only skill-based games and social features. It
+						does not provide real-money gambling, betting, or cash winnings. All
+						coins, gems and rewards are virtual and cannot be withdrawn as real
+						money.
+					</p> */}
 				</div>
 			</div>
 		</footer>

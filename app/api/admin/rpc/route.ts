@@ -4,27 +4,40 @@ import { AUTH_COOKIE_NAME } from '@/lib/auth-cookie';
 
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
-/** Allowed RPC IDs for the admin panel. Backend still enforces is_admin. */
+/** Allowed RPC IDs for the admin panel. Backend still enforces is_admin for admin_* RPCs. */
 const ALLOWED_ADMIN_RPC_IDS = new Set([
   'auth/ensure_admin_metadata',
   'admin/get_fake_user_conversations',
   'admin/get_fake_user_conversation_messages',
   'admin/send_message_as_fake_user',
-  'store/get_received_gifts',
-  'store/get_sent_gifts',
-  'store/get_current_season',
+  // Store – player view (same session as logged-in user)
+  'store/get_wallet',
+  'store/get_items',
+  'store/purchase_item',
+  'store/get_inventory',
+  'store/equip_item',
   'store/get_deals',
-  'store/admin_create_deal',
+  'store/purchase_deal',
+  'store/get_bundles',
+  'store/purchase_bundle',
   'store/get_daily_rewards',
   'store/claim_daily_reward',
+  'store/get_current_season',
+  'store/purchase_premium_pass',
+  'store/claim_season_reward',
   'store/get_achievements',
+  'store/claim_achievement_reward',
+  'store/get_received_gifts',
+  'store/get_sent_gifts',
+  'store/accept_gift',
+  'store/decline_gift',
+  // Store – admin only
+  'store/admin_create_deal',
   'store/admin_get_item_stats',
   'store/admin_add_item',
-  'store/get_items',
   'store/admin_update_item',
   'store/admin_delete_item',
   'store/admin_add_bundle',
-  'store/get_bundles',
   'store/admin_delete_bundle',
   'avatar/admin_list_avatars',
   'avatar/admin_set_avatar_active',

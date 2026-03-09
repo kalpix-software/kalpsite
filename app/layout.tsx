@@ -5,9 +5,12 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Kalpix Games - Social Gaming Platform | Kalpix Software Private Limited',
-  description: 'Play Tero Card, Puzzle Master, and more. Kalpix Games is the social gaming platform by Kalpix Software Private Limited. Play, connect, and compete with friends.',
-  keywords: 'Kalpix Games, social gaming, multiplayer games, Tero Card, Puzzle Master, Kalpix Software Private Limited',
+  title: 'Insta Talk - Social Connection & Skill-based Experiences | Kalpix Software Private Limited',
+  description: 'Insta Talk is the social platform by Kalpix Software Private Limited for chat, posts, avatars, and short skill-based 2D experiences with friends.',
+  keywords: 'Insta Talk, social platform, chat, posts, avatars, skill-based experiences, Kalpix Software Private Limited',
+  icons: {
+    icon: '/kalpix_logo_cropped.jpeg',
+  },
 }
 
 export default function RootLayout({
