@@ -21,9 +21,10 @@ export interface AuthResult {
   token: string;
 }
 
+// Single base URL for both authenticated RPCs (/v2/rpc) and unauthenticated auth
+// RPCs exposed via Nginx (/api/v1/*). In production this should point at your
+// host-level Nginx, e.g. http://api.kalpixsoftware.com.
 const NAKAMA_URL = process.env.NAKAMA_URL || 'http://127.0.0.1:80';
-/** Base URL for unauthenticated auth RPCs (Nginx adds http_key). Use Nginx entry (e.g. http://localhost for port 80). */
-const AUTH_PROXY_URL = process.env.AUTH_PROXY_URL || 'http://localhost';
 
 /** Normalize API error to a string (backend may return error as { code, message }). */
 function errorMessage(data: unknown, fallback: string): string {
@@ -64,8 +65,8 @@ export async function gameRpc(token: string, rpcId: string, payload: string): Pr
 
 /**
  * Login using the game backend's auth/login_email RPC (same flow as Plazy/Postman).
- * Uses AUTH_PROXY_URL so Nginx injects http_key; returns the same session token the game uses.
- * Required so backend's IsVerified check and session token format are used.
+ * Calls the public /api/v1/auth/login_email endpoint exposed by Nginx and returns
+ * the same session token the game uses.
  */
 export async function loginWithGameAuth(email: string, password: string): Promise<AuthResult> {
   const data = (await serverRpc('auth/login_email', {
@@ -83,13 +84,13 @@ export async function loginWithGameAuth(email: string, password: string): Promis
 }
 
 /**
- * Call an unauthenticated auth RPC via Nginx (no http_key on this server; Nginx adds it server-side).
- * Used for register_email, verify_registration_otp, etc. Requires AUTH_PROXY_URL to be set.
+ * Call an unauthenticated auth RPC via Nginx (/api/v1/*). Used for register_email,
+ * verify_registration_otp, etc.
  */
 export async function serverRpc(rpcId: string, payload: Record<string, unknown>): Promise<unknown> {
-  const base = (AUTH_PROXY_URL || '').replace(/\/$/, '');
+  const base = (NAKAMA_URL || '').replace(/\/$/, '');
   if (!base) {
-    throw new Error('AUTH_PROXY_URL is not set; cannot call unauthenticated auth RPCs securely');
+    throw new Error('NAKAMA_URL is not set; cannot call unauthenticated auth RPCs');
   }
   const url = `${base}/api/v1/${rpcId}`;
   const res = await fetch(url, {
