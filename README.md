@@ -49,6 +49,21 @@ yarn dev
 
 3. Open [http://localhost:3000](http://localhost:3000) in your browser.
 
+### API endpoint (local vs production)
+
+Kalpsite talks to the game backend (auth, admin RPCs) using the **`NAKAMA_URL`** environment variable. Set it per environment so that:
+
+- **Local**: Kalpsite hits your local API (e.g. Nginx + Nakama on your machine).
+- **Production**: Kalpsite hits the production API (e.g. api.kalpixsoftware.com).
+
+| Environment | Where to set | Example value |
+|-------------|--------------|---------------|
+| **Local**   | `.env.local` (create from `.env.example`, gitignored) | `NAKAMA_URL=http://127.0.0.1:80` or `http://localhost:80` |
+| **Production** | Hosting dashboard (Vercel, etc.) → Environment Variables | `NAKAMA_URL=https://api.kalpixsoftware.com` |
+
+- Copy `.env.example` to `.env.local` and set `NAKAMA_URL` to your local backend URL. Do not commit `.env.local`.
+- For production, add `NAKAMA_URL` (and any other vars) in your deployment project’s environment settings. No code changes are needed; the same app uses the URL from the environment.
+
 ## Project Structure
 
 ```

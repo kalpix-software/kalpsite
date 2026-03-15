@@ -5,17 +5,22 @@ import { AUTH_COOKIE_NAME } from '@/lib/auth-cookie';
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
 /**
- * Returns 200 with { authenticated: true | false }. Validates the cookie token by calling
- * an auth-required RPC (same token format as login), so custom game JWTs are accepted.
+ * GET: returns { authenticated: true | false }. Validates the session using
+ * social/get_profile_info (same RPC Plazy uses). Token from cookie or Authorization header.
  */
 export async function GET(req: NextRequest) {
-  const token = req.cookies.get(AUTH_COOKIE_NAME)?.value;
+  const token =
+    req.cookies.get(AUTH_COOKIE_NAME)?.value ??
+    req.headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim();
   if (!token) {
     return NextResponse.json({ authenticated: false }, { headers: NO_STORE });
   }
   try {
-    await gameRpc(token, 'auth/ensure_admin_metadata', '{}');
-    return NextResponse.json({ authenticated: true }, { headers: NO_STORE });
+    const profile = (await gameRpc(token, 'social/get_profile_info', '{}')) as { isAdmin?: boolean };
+    if (profile?.isAdmin === true) {
+      return NextResponse.json({ authenticated: true }, { headers: NO_STORE });
+    }
+    return NextResponse.json({ authenticated: false }, { headers: NO_STORE });
   } catch {
     return NextResponse.json({ authenticated: false }, { headers: NO_STORE });
   }

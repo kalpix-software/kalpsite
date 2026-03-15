@@ -11,6 +11,7 @@ import {
 
 const SESSION_URL = '/api/auth/session';
 const SESSION_RETRY_MS = 350;
+const SESSION_RETRY_MS_SECOND = 500;
 
 function useSession(enable: boolean) {
   const [auth, setAuth] = useState<boolean | null>(enable ? null : true);
@@ -25,7 +26,8 @@ function useSession(enable: boolean) {
         .catch(() => false);
 
     let cancelled = false;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let timeout1: ReturnType<typeof setTimeout> | undefined;
+    let timeout2: ReturnType<typeof setTimeout> | undefined;
 
     check().then((ok) => {
       if (cancelled) return;
@@ -33,16 +35,26 @@ function useSession(enable: boolean) {
         setAuth(true);
         return;
       }
-      timeoutId = setTimeout(() => {
+      timeout1 = setTimeout(() => {
         check().then((ok2) => {
-          if (!cancelled) setAuth(ok2);
+          if (cancelled) return;
+          if (ok2) {
+            setAuth(true);
+            return;
+          }
+          timeout2 = setTimeout(() => {
+            check().then((ok3) => {
+              if (!cancelled) setAuth(ok3);
+            });
+          }, SESSION_RETRY_MS_SECOND);
         });
       }, SESSION_RETRY_MS);
     });
 
     return () => {
       cancelled = true;
-      if (timeoutId) clearTimeout(timeoutId);
+      if (timeout1) clearTimeout(timeout1);
+      if (timeout2) clearTimeout(timeout2);
     };
   }, [enable]);
 

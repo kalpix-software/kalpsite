@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { loginWithGameAuth, gameRpc } from '@/lib/nakama';
+import { loginWithGameAuth } from '@/lib/nakama';
 import { AUTH_COOKIE_NAME, authCookieOptions, validateOrigin } from '@/lib/auth-cookie';
 
 const NO_STORE = { 'Cache-Control': 'no-store' };
@@ -17,8 +17,8 @@ function authErrorMessage(err: unknown): string {
 }
 
 /**
- * Admin login: email + password must match .env. On match, authenticate via game backend
- * (auth/login_email RPC, same as Plazy/Postman), set is_admin if needed, set session cookie.
+ * Admin login: same as Plazy – auth/login_email. Backend returns is_admin from account
+ * metadata in the login response (no extra RPC or DB query). Only allow if isAdmin is true.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -33,20 +33,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Email and password required' }, { status: 400, headers: NO_STORE });
     }
 
-    const adminEmail = process.env.KALPSITE_ADMIN_EMAIL;
-    const adminPassword = process.env.KALPSITE_ADMIN_PASSWORD;
-    if (!adminEmail || !adminPassword) {
-      return NextResponse.json(
-        { error: 'Admin not configured (KALPSITE_ADMIN_EMAIL, KALPSITE_ADMIN_PASSWORD)' },
-        { status: 503, headers: NO_STORE }
-      );
-    }
-    if (email !== adminEmail || password !== adminPassword) {
-      return NextResponse.json({ error: 'Invalid email or password' }, { status: 401, headers: NO_STORE });
-    }
-
     try {
-      const { token } = await loginWithGameAuth(email, password);
+      const { token, isAdmin } = await loginWithGameAuth(email, password);
       const sessionToken = token?.trim();
       if (!sessionToken) {
         return NextResponse.json(
@@ -54,14 +42,17 @@ export async function POST(req: NextRequest) {
           { status: 502, headers: NO_STORE }
         );
       }
-
-      try {
-        await gameRpc(sessionToken, 'auth/ensure_admin_metadata', '{}');
-      } catch {
-        // Non-fatal: admin metadata may already be set
+      if (!isAdmin) {
+        return NextResponse.json(
+          { error: 'Not an admin account. Your account must have admin access in the game backend.' },
+          { status: 403, headers: NO_STORE }
+        );
       }
 
-      const res = NextResponse.json({ success: true, user: { email } }, { headers: NO_STORE });
+      const res = NextResponse.json(
+        { success: true, user: { email }, sessionToken: sessionToken },
+        { headers: NO_STORE }
+      );
       res.cookies.set(AUTH_COOKIE_NAME, sessionToken, authCookieOptions);
       return res;
     } catch (e) {

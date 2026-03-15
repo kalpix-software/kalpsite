@@ -19,11 +19,12 @@ interface NakamaRpcResponse {
 
 export interface AuthResult {
   token: string;
+  isAdmin?: boolean;
 }
 
-// Single base URL for both authenticated RPCs (/v2/rpc) and unauthenticated auth
-// RPCs exposed via Nginx (/api/v1/*). In production this should point at your
-// host-level Nginx, e.g. http://api.kalpixsoftware.com.
+// Base URL for the game API. Set NAKAMA_URL per environment:
+// - Local: .env.local with NAKAMA_URL=http://127.0.0.1:80 (or localhost)
+// - Production: set NAKAMA_URL=https://api.kalpixsoftware.com in your hosting env
 const NAKAMA_URL = process.env.NAKAMA_URL || 'http://127.0.0.1:80';
 
 /** Normalize API error to a string (backend may return error as { code, message }). */
@@ -39,11 +40,15 @@ function errorMessage(data: unknown, fallback: string): string {
 }
 
 /**
- * Call a game RPC with a game session token (Bearer). Used by Kalpsite admin after login.
- * The token must be for a game user with is_admin in metadata; the backend enforces that.
+ * Call a game RPC with a game session token (Bearer). Uses the same /api/v1/ path as
+ * Plazy (Nginx proxies to Nakama). Do not use /v2/rpc directly – it is not exposed.
  */
 export async function gameRpc(token: string, rpcId: string, payload: string): Promise<unknown> {
-  const url = `${NAKAMA_URL.replace(/\/$/, '')}/v2/rpc/${rpcId}?unwrap`;
+  const base = (NAKAMA_URL || '').replace(/\/$/, '');
+  if (!base) {
+    throw new Error('NAKAMA_URL is not set');
+  }
+  const url = `${base}/api/v1/${rpcId}`;
   const body = payload?.trim() || '{}';
   const res = await fetch(url, {
     method: 'POST',
@@ -53,7 +58,14 @@ export async function gameRpc(token: string, rpcId: string, payload: string): Pr
     },
     body,
   });
-  const data: NakamaRpcResponse = await res.json().catch(() => ({}));
+  let data: NakamaRpcResponse = await res.json().catch(() => ({}));
+  if (typeof data.payload === 'string') {
+    try {
+      data = JSON.parse(data.payload) as NakamaRpcResponse;
+    } catch {
+      // keep as-is
+    }
+  }
   if (!res.ok) {
     throw new Error(errorMessage(data, `RPC failed: ${res.status}`));
   }
@@ -75,12 +87,13 @@ export async function loginWithGameAuth(email: string, password: string): Promis
     deviceId: 'kalpsite-admin',
     platform: 'web',
     deviceName: 'Kalpsite Admin',
-  })) as { sessionToken?: string };
+  })) as { sessionToken?: string; isAdmin?: boolean; profile?: { isAdmin?: boolean } };
   const token = typeof data?.sessionToken === 'string' ? data.sessionToken.trim() : '';
   if (!token) {
     throw new Error('Game server did not return a session token');
   }
-  return { token };
+  const isAdmin = data?.isAdmin === true || data?.profile?.isAdmin === true;
+  return { token, isAdmin };
 }
 
 /**

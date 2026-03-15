@@ -21,9 +21,9 @@ All admin pages live under `/admin` and **require login**. If you are not logged
 ### **`/admin/login`**
 
 - **URL:** `http://localhost:3000/admin/login`
-- **What it does:** Login form for the Kalpix admin panel.
-- **Fields:** **Username** and **Password** (Nakama Dashboard / Console credentials).
-- **Behaviour:** On success, sets a session cookie and redirects to `/admin`. On failure, shows an error message.
+- **What it does:** **Login only** (no registration). Use an admin account created manually in Nakama (Dashboard, API Explorer, or Postman) with **`is_admin: true`** in account metadata.
+- **Fields:** **Email** and **Password** (that account’s credentials). Only users with **`is_admin`** in Nakama can log in.
+- **Behaviour:** On success, sets a session cookie and redirects to `/admin`. On failure (invalid credentials or not an admin account), shows an error message.
 - **Link:** “Back to site” goes to `/`.
 
 - **How to get there:** Use the **Admin** link in the top nav (or mobile menu), or the **Admin** link under **Company** in the footer. Or open `/admin` or `/admin/login` in the browser.
@@ -76,21 +76,19 @@ All admin pages live under `/admin` and **require login**. If you are not logged
 
 ## Which credentials to use
 
-Log in with the **same username and password** you use for the **Nakama Dashboard** (Console). Kalpsite uses **only the Console API**:
+Log in with the **email and password** of a **game user** (same as Plazy or Postman). Admin access is **verified from the Nakama DB**: only users who have **`is_admin`** in their account metadata can log in.
 
-- **Login:** `POST {NAKAMA_CONSOLE_URL}/v2/console/authenticate` (same endpoint as the Nakama Dashboard). On success, the returned console token is stored in a cookie.
-- **Admin tasks (prices, sync, store, bundles, etc.):** Kalpsite calls the Console API **CallRpcEndpoint** with that token and **NAKAMA_ADMIN_USER_ID**. The RPC runs as that game user; the backend allows it only if that user has **is_admin: true** in metadata. No shared secret in requests.
+- **Login:** Kalpsite uses the same auth as Plazy: **auth/login_email**. The backend returns **isAdmin** in the response (from account metadata). Session check uses **social/get_profile_info** (same RPC Plazy uses); profile includes **isAdmin**.
+- **Admin tasks:** Kalpsite calls the game API with that session token; the backend enforces `is_admin` for admin RPCs.
 
-**Setup:** Create a game user in Nakama, set **is_admin: true** in metadata, copy its UUID, and set **NAKAMA_ADMIN_USER_ID** in Kalpsite `.env`. See **docs/ADMIN_AUTH_SECURITY.md** for step-by-step instructions.
+**Setup:** In **kalpix-backend** set **ADMIN_EMAIL** so the backend grants `is_admin` to that user on register/verify, or set **`is_admin: true`** manually in Nakama for a user. See **docs/ADMIN_AUTH_SECURITY.md**.
 
 ---
 
 ## Environment (for reference)
 
-- **`NAKAMA_URL`** – Nakama game server (e.g. `http://127.0.0.1:7350`). Used by the game; Kalpsite admin uses Console API only.
-- **`NAKAMA_SERVER_KEY`** – Server key for Nakama game API (e.g. `defaultkey`). See `.env.example`.
-- **`NAKAMA_CONSOLE_URL`** – Nakama Console API (e.g. `http://localhost:7351`). Used for login and admin RPCs.
-- **`NAKAMA_ADMIN_USER_ID`** – UUID of a game user with **is_admin** in metadata. Admin RPCs run as this user. Required. See docs/ADMIN_AUTH_SECURITY.md.
+- **`NAKAMA_URL`** – Game server URL (e.g. `http://127.0.0.1:80` or your Nginx in front of Nakama). Used for login and all admin RPCs.
+- **`NAKAMA_SERVER_KEY`** – Server key (see `.env.example`). No Kalpsite-specific admin credentials; admin is verified from Nakama DB.
 
 ---
 

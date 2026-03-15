@@ -6,7 +6,7 @@ const NO_STORE = { 'Cache-Control': 'no-store' };
 
 /** Allowed RPC IDs for the admin panel. Backend still enforces is_admin for admin_* RPCs. */
 const ALLOWED_ADMIN_RPC_IDS = new Set([
-  'auth/ensure_admin_metadata',
+  'social/get_profile_info', // session check + Plazy uses this
   'admin/get_fake_user_conversations',
   'admin/get_fake_user_conversation_messages',
   'admin/send_message_as_fake_user',
