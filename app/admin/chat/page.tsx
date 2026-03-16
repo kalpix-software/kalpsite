@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Send, RefreshCw, MessageSquare, Bot, User, Search,
-  Image as ImageIcon, Film, FileText, Music, Smile,
+  Image as ImageIcon, Film, FileText, Music, Smile, Paperclip,
 } from 'lucide-react';
+import { Client, Session } from '@heroiclabs/nakama-js';
 import { callAdminRpc } from '@/lib/admin-rpc';
 
 // ---------------------------------------------------------------------------
@@ -53,6 +55,8 @@ interface ChatMessage {
   isDeleted: boolean;
   createdAt: number;
   updatedAt: number;
+  /** emoji -> list of userIds (from backend) */
+  reactions?: Record<string, string[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -118,6 +122,8 @@ function getMediaUrls(msg: ChatMessage): string[] {
   if (msg.mediaUrl) return [msg.mediaUrl];
   return [];
 }
+
+const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '👏', '😊', '🤔', '🎉'];
 
 function isImageType(type?: string): boolean {
   return type === 'image' || type === 'gif';
@@ -268,7 +274,14 @@ export default function AdminChatPage() {
   const [sending, setSending] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null);
+  const reactionPickerAnchorRef = useRef<HTMLElement | null>(null);
+  const [pickerPosition, setPickerPosition] = useState<{ left: number; top: number } | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const convoPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -293,30 +306,46 @@ export default function AdminChatPage() {
     }
   }, []);
 
-  const fetchMessages = useCallback(async (channelId: string) => {
+  const fetchMessages = useCallback(async (channelId: string, cursor?: string, append = false) => {
     try {
-      setLoadingMessages(true);
+      if (!append) setLoadingMessages(true);
       const res = await callAdminRpc('admin/get_fake_user_conversation_messages', JSON.stringify({
         channelId,
-        limit: 200,
+        limit: 50,
+        ...(cursor ? { cursor } : {}),
       }));
 
-      let msgs = (res as { messages?: ChatMessage[] }).messages || [];
+      const data = res as { messages?: ChatMessage[]; nextCursor?: string };
+      let msgs = data.messages || [];
+      const next = data.nextCursor && data.nextCursor !== '' ? data.nextCursor : null;
 
       // Backend returns newest-first; reverse so oldest is at top
       msgs = [...msgs].reverse();
 
-      setMessages(msgs);
-      setError(null);
-      setTimeout(scrollToBottom, 100);
+      if (append) {
+        setMessages(prev => [...msgs, ...prev]);
+        setNextCursor(next);
+        setLoadingMore(false);
+      } else {
+        setMessages(msgs);
+        setNextCursor(next);
+        setError(null);
+        setTimeout(scrollToBottom, 100);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
-      console.error('Failed to fetch messages:', msg, err);
-      setError(`Messages: ${msg}`);
+      if (!append) setError(`Messages: ${msg}`);
+      setLoadingMore(false);
     } finally {
-      setLoadingMessages(false);
+      if (!append) setLoadingMessages(false);
     }
   }, [scrollToBottom]);
+
+  const loadMoreMessages = useCallback(() => {
+    if (!selectedConvo || !nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    fetchMessages(selectedConvo.conversationId, nextCursor, true);
+  }, [selectedConvo, nextCursor, loadingMore, fetchMessages]);
 
   // ------ Polling ------
 
@@ -333,6 +362,88 @@ export default function AdminChatPage() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [selectedConvo, fetchMessages]);
 
+  // ------ Real-time: join channel stream so we receive reaction_update / new_message (and receiver gets our reactions via backend)
+  const wsUrl = typeof window !== 'undefined' ? process.env.NEXT_PUBLIC_NAKAMA_WS_URL : undefined;
+  useEffect(() => {
+    if (!selectedConvo?.conversationId || !wsUrl) return;
+    let socket: ReturnType<Client['createSocket']> | null = null;
+    let client: Client | null = null;
+    const channelId = selectedConvo.conversationId;
+
+    const applyReactionUpdate = (json: { messageId?: string; emoji?: string; userId?: string; action?: string }) => {
+      const { messageId, emoji, userId, action } = json;
+      if (!messageId || !emoji || !userId || !action) return;
+      setMessages(prev => prev.map(msg => {
+        if (msg.messageId !== messageId) return msg;
+        const reactions: Record<string, string[]> = {};
+        for (const [k, v] of Object.entries(msg.reactions || {})) {
+          let list = (v || []).filter(id => id !== userId);
+          if (k === emoji && action === 'added') list = [...list, userId];
+          if (list.length > 0) reactions[k] = list;
+        }
+        if (action === 'added' && !reactions[emoji]?.includes(userId)) {
+          reactions[emoji] = [...(reactions[emoji] || []), userId];
+        }
+        return { ...msg, reactions: Object.keys(reactions).length ? reactions : undefined };
+      }));
+    };
+
+    const handlePayload = (content: string | object) => {
+      try {
+        const json = typeof content === 'string' ? JSON.parse(content) : content;
+        if (json.channelId !== channelId) return;
+        switch (json.type) {
+          case 'reaction_update':
+            applyReactionUpdate(json);
+            break;
+          case 'new_message':
+            fetchMessages(channelId);
+            break;
+          default:
+            break;
+        }
+      } catch {
+        // ignore parse errors
+      }
+    };
+
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/socket-token', { credentials: 'include' });
+        if (!res.ok) return;
+        const { token } = (await res.json()) as { token?: string };
+        if (!token) return;
+        const url = new URL(wsUrl);
+        const useSsl = url.protocol === 'wss:';
+        const port = url.port ? parseInt(url.port, 10) : (useSsl ? 443 : 80);
+        client = new Client('defaultkey', url.hostname, port.toString(), useSsl);
+        const session = Session.restore(token, '');
+        socket = client.createSocket(useSsl);
+        socket.onstreamdata = (streamData) => handlePayload(streamData.data);
+        socket.onnotification = (notification) => {
+          if (notification.content) handlePayload(notification.content as object);
+        };
+        await socket.connect(session, false);
+        await callAdminRpc('chat/join_stream', JSON.stringify({ channelId }));
+      } catch (err) {
+        console.warn('Bot chat real-time: socket/join failed', err);
+      }
+    })();
+
+    return () => {
+      (async () => {
+        try {
+          if (socket) await callAdminRpc('chat/leave_stream', JSON.stringify({ channelId }));
+        } catch {
+          // ignore
+        }
+      })();
+      if (socket) socket.disconnect(false);
+      socket = null;
+      client = null;
+    };
+  }, [selectedConvo?.conversationId, wsUrl, fetchMessages]);
+
   useEffect(() => {
     if (!searchQuery.trim()) {
       setFilteredConversations(conversations);
@@ -346,21 +457,64 @@ export default function AdminChatPage() {
     }
   }, [searchQuery, conversations]);
 
+  // Position reaction picker above the anchor button (so it's not clipped by overflow)
+  useLayoutEffect(() => {
+    if (!reactionPickerFor || !reactionPickerAnchorRef.current) {
+      setPickerPosition(null);
+      return;
+    }
+    const rect = reactionPickerAnchorRef.current.getBoundingClientRect();
+    const pickerHeight = 64;
+    const gap = 6;
+    setPickerPosition({
+      left: Math.max(8, Math.min(rect.left, typeof window !== 'undefined' ? window.innerWidth - 220 : rect.left)),
+      top: rect.top - pickerHeight - gap,
+    });
+  }, [reactionPickerFor]);
+
   // ------ Actions ------
 
   const handleSend = async () => {
     if (!selectedConvo || !newMessage.trim() || sending) return;
+    const content = newMessage.trim();
+    setNewMessage('');
+    setError(null);
+
+    // Optimistic message (same shape as ChatMessage; will be replaced on success)
+    const tempId = `temp-${Date.now()}`;
+    const now = Math.floor(Date.now() / 1000);
+    const optimistic: ChatMessage = {
+      messageId: tempId,
+      channelId: selectedConvo.conversationId,
+      senderId: selectedConvo.botId,
+      senderName: selectedConvo.botName,
+      content,
+      messageType: 'text',
+      status: 'pending',
+      isEdited: false,
+      isDeleted: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    setMessages(prev => [...prev, optimistic]);
+    scrollToBottom();
     setSending(true);
+
     try {
       await callAdminRpc('admin/send_message_as_fake_user', JSON.stringify({
         fakeUserId: selectedConvo.botId,
         channelId: selectedConvo.conversationId,
-        content: newMessage.trim(),
+        content,
+        ...(replyingTo ? { replyToId: replyingTo.messageId } : {}),
       }));
-      setNewMessage('');
+      // Replace optimistic with server state
       await fetchMessages(selectedConvo.conversationId);
+      setReplyingTo(null);
     } catch (err) {
-      console.error('Failed to send message:', err);
+      const msg = err instanceof Error ? err.message : 'Failed to send message';
+      setError(msg);
+      setMessages(prev => prev.filter(m => m.messageId !== tempId));
+      setNewMessage(content);
     } finally {
       setSending(false);
     }
@@ -373,9 +527,80 @@ export default function AdminChatPage() {
     }
   };
 
+  const handleReaction = useCallback(async (messageId: string, emoji: string) => {
+    if (!selectedConvo) return;
+    setReactionPickerFor(null);
+    try {
+      await callAdminRpc('chat/add_reaction', JSON.stringify({
+        channelId: selectedConvo.conversationId,
+        messageId,
+        emoji,
+      }));
+      await fetchMessages(selectedConvo.conversationId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to update reaction';
+      setError(msg);
+    }
+  }, [selectedConvo, fetchMessages]);
+
+  const handleSendMedia = useCallback(async (files: FileList | null) => {
+    if (!selectedConvo || !files || files.length === 0 || sending) return;
+    setError(null);
+    setSending(true);
+    try {
+      const filesList = Array.from(files);
+      const res = await callAdminRpc('social/upload_media', JSON.stringify({
+        context: 'chat',
+        files: filesList.map(f => ({
+          fileName: f.name,
+          contentType: f.type || 'application/octet-stream',
+        })),
+      }));
+      const uploads =
+        (res.data as { uploads?: { uploadUrl: string; key: string; mediaUrl: string }[] } | undefined)?.uploads ??
+        (res as { uploads?: { uploadUrl: string; key: string; mediaUrl: string }[] }).uploads ??
+        [];
+      if (uploads.length !== filesList.length) {
+        throw new Error('Upload slots count mismatch');
+      }
+      for (let i = 0; i < uploads.length; i++) {
+        const { uploadUrl } = uploads[i];
+        const file = filesList[i];
+        const putRes = await fetch(uploadUrl, {
+          method: 'PUT',
+          body: file,
+          headers: { 'Content-Type': file.type || 'application/octet-stream' },
+        });
+        if (!putRes.ok) {
+          throw new Error(`Upload failed: ${putRes.status}`);
+        }
+      }
+      const keys = uploads.map(u => u.key);
+      await callAdminRpc('admin/send_message_as_fake_user', JSON.stringify({
+        fakeUserId: selectedConvo.botId,
+        channelId: selectedConvo.conversationId,
+        content: newMessage.trim() || undefined,
+        keys,
+        ...(replyingTo ? { replyToId: replyingTo.messageId } : {}),
+      }));
+      setNewMessage('');
+      setReplyingTo(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      await fetchMessages(selectedConvo.conversationId);
+      scrollToBottom();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to send media';
+      setError(msg);
+    } finally {
+      setSending(false);
+    }
+  }, [selectedConvo, newMessage, replyingTo, sending, fetchMessages, scrollToBottom]);
+
   const selectConversation = (convo: Conversation) => {
     setSelectedConvo(convo);
     setMessages([]);
+    setNextCursor(null);
+    setReplyingTo(null);
   };
 
   const messageGroups = groupMessagesByDate(messages);
@@ -390,6 +615,39 @@ export default function AdminChatPage() {
           {error}
           <button onClick={() => setError(null)} className="ml-3 underline">dismiss</button>
         </div>
+      )}
+
+      {/* Reaction picker (portal so it is not clipped by overflow) */}
+      {typeof document !== 'undefined' && reactionPickerFor && pickerPosition && createPortal(
+        <div className="fixed inset-0 z-[10]" aria-hidden={false}>
+          <div
+            className="absolute w-full h-full"
+            onClick={() => { setReactionPickerFor(null); setPickerPosition(null); }}
+          />
+          <div
+            className="absolute flex flex-col gap-0.5 p-2 bg-slate-800 border border-slate-600 rounded-xl shadow-xl z-20 max-w-[200px]"
+            style={{ left: pickerPosition.left, top: pickerPosition.top }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="grid grid-cols-4 gap-0.5">
+              {REACTION_EMOJIS.map((e) => (
+                <button
+                  key={e}
+                  type="button"
+                  className="text-xl hover:scale-110 active:scale-95 transition-transform p-1.5 rounded hover:bg-slate-700"
+                  onClick={() => {
+                    handleReaction(reactionPickerFor, e);
+                    setReactionPickerFor(null);
+                    setPickerPosition(null);
+                  }}
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
       {/* =================== Sidebar =================== */}
@@ -528,7 +786,20 @@ export default function AdminChatPage() {
                   No messages in this conversation
                 </div>
               ) : (
-                messageGroups.map((group, gi) => (
+                <>
+                  {nextCursor && (
+                    <div className="flex justify-center mb-3">
+                      <button
+                        type="button"
+                        onClick={loadMoreMessages}
+                        disabled={loadingMore}
+                        className="px-4 py-2 text-sm bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-300 rounded-lg transition"
+                      >
+                        {loadingMore ? 'Loading...' : 'Load older messages'}
+                      </button>
+                    </div>
+                  )}
+                  {messageGroups.map((group, gi) => (
                   <div key={gi}>
                     <div className="flex items-center justify-center my-4">
                       <span className="text-xs text-slate-500 bg-slate-800 px-3 py-1 rounded-full">
@@ -621,26 +892,96 @@ export default function AdminChatPage() {
                                   ({selectedConvo.botName})
                                 </span>
                               )}
+                              <button
+                                type="button"
+                                onClick={() => setReplyingTo(msg)}
+                                className={`text-[10px] ml-1 opacity-70 hover:opacity-100 underline ${isFakeUser ? 'text-indigo-200' : 'text-slate-500'}`}
+                              >
+                                Reply
+                              </button>
+                              <div className="relative ml-1">
+                                <button
+                                  ref={(el) => { if (reactionPickerFor === msg.messageId) reactionPickerAnchorRef.current = el; }}
+                                  type="button"
+                                  onClick={(e) => {
+                                    reactionPickerAnchorRef.current = e.currentTarget;
+                                    setReactionPickerFor(prev => prev === msg.messageId ? null : msg.messageId);
+                                  }}
+                                  className={`text-[10px] p-0.5 rounded opacity-70 hover:opacity-100 ${isFakeUser ? 'text-indigo-200' : 'text-slate-500'}`}
+                                  title="React"
+                                >
+                                  <Smile className="w-3.5 h-3.5 inline" />
+                                </button>
+                              </div>
                             </div>
+                            {/* Reaction pills - horizontal scroll when many so layout does not break */}
+                            {msg.reactions && Object.keys(msg.reactions).length > 0 && (
+                              <div className="flex gap-1 mt-1 overflow-x-auto overflow-y-hidden max-w-full min-h-0">
+                                {Object.entries(msg.reactions).map(([emoji, userIds]) => (
+                                  <button
+                                    key={emoji}
+                                    type="button"
+                                    onClick={() => handleReaction(msg.messageId, emoji)}
+                                    className={`text-xs px-1.5 py-0.5 rounded-full border shrink-0 ${
+                                      isFakeUser ? 'bg-indigo-700/50 border-indigo-500/50' : 'bg-slate-700/50 border-slate-600'
+                                    } hover:opacity-90`}
+                                    title={`${emoji} ${userIds.length}`}
+                                  >
+                                    {emoji} {userIds.length > 1 ? userIds.length : ''}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
                     })}
                   </div>
-                ))
+                  ))}
+                </>
               )}
               <div ref={messagesEndRef} />
             </div>
 
             {/* Input */}
             <div className="px-5 py-3 border-t border-slate-700 bg-slate-900/80">
+              {replyingTo && (
+                <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-slate-400">Replying to {replyingTo.displayName || replyingTo.senderName}</p>
+                    <p className="text-xs text-slate-500 truncate">{replyingTo.content || 'Media'}</p>
+                  </div>
+                  <button type="button" onClick={() => setReplyingTo(null)} className="text-slate-500 hover:text-slate-300 text-sm">Cancel</button>
+                </div>
+              )}
               <div className="flex items-end gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*,video/*,audio/*,.pdf,.doc,.docx"
+                  multiple
+                  className="hidden"
+                  onChange={e => {
+                    const files = e.target.files;
+                    if (files?.length) handleSendMedia(files);
+                    e.target.value = '';
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={sending}
+                  className="p-2.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700 rounded-xl transition shrink-0 disabled:opacity-50"
+                  title="Attach file"
+                >
+                  <Paperclip className="w-4 h-4" />
+                </button>
                 <div className="flex-1 relative">
                   <textarea
                     value={newMessage}
                     onChange={e => setNewMessage(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder={`Reply as ${selectedConvo.botName}...`}
+                    placeholder={replyingTo ? `Reply as ${selectedConvo.botName}...` : `Reply as ${selectedConvo.botName}...`}
                     rows={1}
                     className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 resize-none"
                     style={{ minHeight: '42px', maxHeight: '120px' }}

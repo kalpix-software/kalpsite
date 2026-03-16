@@ -51,18 +51,24 @@ yarn dev
 
 ### API endpoint (local vs production)
 
-Kalpsite talks to the game backend (auth, admin RPCs) using the **`NAKAMA_URL`** environment variable. Set it per environment so that:
+Kalpsite talks to the game backend (auth, admin RPCs) using **`NAKAMA_URL`** only. No hardcoded backend URLs.
 
-- **Local**: Kalpsite hits your local API (e.g. Nginx + Nakama on your machine).
-- **Production**: Kalpsite hits the production API (e.g. api.kalpixsoftware.com).
+**Environment matrix**
 
-| Environment | Where to set | Example value |
-|-------------|--------------|---------------|
-| **Local**   | `.env.local` (create from `.env.example`, gitignored) | `NAKAMA_URL=http://127.0.0.1:80` or `http://localhost:80` |
-| **Production** | Hosting dashboard (Vercel, etc.) → Environment Variables | `NAKAMA_URL=https://api.kalpixsoftware.com` |
+| Environment | Where to set | NAKAMA_URL |
+|-------------|--------------|------------|
+| **Local**   | `.env.local` (create from `.env.example`; gitignored) | `http://localhost` |
+| **Production (Vercel)** | Vercel → Settings → Environment Variables | `https://api.kalpixsoftware.com` |
 
-- Copy `.env.example` to `.env.local` and set `NAKAMA_URL` to your local backend URL. Do not commit `.env.local`.
-- For production, add `NAKAMA_URL` (and any other vars) in your deployment project’s environment settings. No code changes are needed; the same app uses the URL from the environment.
+- Copy `.env.example` to `.env.local` and set `NAKAMA_URL=http://localhost`. Do not commit `.env.local`.
+- In production, set `NAKAMA_URL=https://api.kalpixsoftware.com` in your hosting env. No code changes needed.
+
+### Local dev workflow (full stack)
+
+1. **Backend:** In `kalpix-backend`, run `docker compose up -d`. Start local Nginx with the config from `kalpix-backend/docs/nginx-local/README.md` so `http://localhost/api/v1/...` proxies to Nakama.
+2. **Kalpsite:** Create `kalpsite/.env.local` with `NAKAMA_URL=http://localhost`.
+3. **Run:** From `kalpsite`, run `npm run dev` (or `yarn dev`).
+4. **Test:** Open `http://localhost:3000/admin`, log in; all backend calls go to `http://localhost/api/v1/...`.
 
 ## Project Structure
 

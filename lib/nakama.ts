@@ -22,10 +22,10 @@ export interface AuthResult {
   isAdmin?: boolean;
 }
 
-// Base URL for the game API. Set NAKAMA_URL per environment:
-// - Local: .env.local with NAKAMA_URL=http://127.0.0.1:80 (or localhost)
-// - Production: set NAKAMA_URL=https://api.kalpixsoftware.com in your hosting env
-const NAKAMA_URL = process.env.NAKAMA_URL || 'http://127.0.0.1:80';
+// Backend gateway URL. Set NAKAMA_URL per environment:
+// - Local: .env.local with NAKAMA_URL=http://localhost
+// - Production: NAKAMA_URL=https://api.kalpixsoftware.com (e.g. in Vercel env)
+const NAKAMA_URL = process.env.NAKAMA_URL || 'http://localhost';
 
 /** Normalize API error to a string (backend may return error as { code, message }). */
 function errorMessage(data: unknown, fallback: string): string {

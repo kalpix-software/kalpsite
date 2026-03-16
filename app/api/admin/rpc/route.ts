@@ -10,6 +10,16 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   'admin/get_fake_user_conversations',
   'admin/get_fake_user_conversation_messages',
   'admin/send_message_as_fake_user',
+  // Chat (same as Plazy – for consistency; bot chat uses admin/* above)
+  'chat/get_messages',
+  'chat/mark_messages_read',
+  'chat/send_message',
+  'chat/create_or_get_dm_channel',
+  'chat/add_reaction',
+  'chat/remove_reaction',
+  'chat/join_stream',
+  'chat/leave_stream',
+  'social/upload_media',
   // Store – player view (same session as logged-in user)
   'store/get_wallet',
   'store/get_items',
