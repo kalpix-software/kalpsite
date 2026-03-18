@@ -391,13 +391,27 @@ export default function AdminChatPage() {
     const handlePayload = (content: string | object) => {
       try {
         const json = typeof content === 'string' ? JSON.parse(content) : content;
-        if (json.channelId !== channelId) return;
+        const msgChannelId = json.channelId;
+        const isForThisChannel = !msgChannelId || msgChannelId === channelId;
+
         switch (json.type) {
           case 'reaction_update':
-            applyReactionUpdate(json);
+            if (isForThisChannel) applyReactionUpdate(json);
             break;
           case 'new_message':
-            fetchMessages(channelId);
+            if (isForThisChannel) fetchMessages(channelId);
+            break;
+          case 'presence_update':
+            if (isForThisChannel && json.userId) {
+              const isOnline = !!json.isOnline;
+              const lastSeenAt = typeof json.lastSeenAt === 'number' ? json.lastSeenAt : 0;
+              setConversations(prev => prev.map(c =>
+                c.userId === json.userId ? { ...c, isOnline, lastSeenAt } : c
+              ));
+              setSelectedConvo(prev => prev && prev.userId === json.userId
+                ? { ...prev, isOnline, lastSeenAt }
+                : prev);
+            }
             break;
           default:
             break;

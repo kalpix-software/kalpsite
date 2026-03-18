@@ -15,14 +15,14 @@ type AvatarListItem = {
   sortOrder?: number;
 };
 
-type CatalogOption = { optionId: string; label: string; previewUrl?: string; skinName?: string; price?: { coins: number; gems: number } };
+type CatalogOption = { optionId: string; label: string; previewUrl?: string; skinName?: string; price?: { coins: number; gems: number }; isStackable?: boolean; maxQuantityPerUser?: number };
 type CatalogSubcategory = { key: string; label: string; options: CatalogOption[] };
 type CatalogCategory = { key: string; label: string; subcategories: CatalogSubcategory[] };
 type CatalogPart = { defaultSelection?: Record<string, string>; categories: CatalogCategory[] };
 type AvatarCatalogEntry = { slug: string; avatarName: string; catalog?: CatalogPart; categories?: CatalogCategory[] };
 type RawCatalogBundle = { avatars: AvatarCatalogEntry[] };
 
-type PriceRow = { slug: string; categoryKey: string; subcategoryKey: string; optionId: string; label: string; coins: number; gems: number; rowKey: string };
+type PriceRow = { slug: string; categoryKey: string; subcategoryKey: string; optionId: string; label: string; coins: number; gems: number; isStackable: boolean; maxQuantityPerUser: number; rowKey: string };
 
 /** Normalize single-file format (slug, avatarName, categories) or bundle (avatars[]) to { avatars: [ { slug, avatarName, catalog: { categories } } ] }. */
 function normalizeToBundle(data: unknown): RawCatalogBundle {
@@ -63,6 +63,8 @@ function flattenToPriceRows(avatars: RawCatalogBundle['avatars']): PriceRow[] {
             label: opt.label,
             coins: opt.price?.coins ?? 0,
             gems: opt.price?.gems ?? 0,
+            isStackable: opt.isStackable ?? false,
+            maxQuantityPerUser: opt.maxQuantityPerUser ?? 1,
             rowKey: `${av.slug}|${cat.key}|${sub.key}|${opt.optionId}`,
           });
         }
@@ -88,7 +90,12 @@ function applyPricesToCatalog(avatars: RawCatalogBundle['avatars'], priceRows: P
             options: (sub.options ?? []).map((opt) => {
               const rowKey = `${av.slug}|${cat.key}|${sub.key}|${opt.optionId}`;
               const row = byKey.get(rowKey);
-              return { ...opt, price: row ? { coins: row.coins, gems: row.gems } : opt.price };
+              return {
+                ...opt,
+                price: row ? { coins: row.coins, gems: row.gems } : opt.price,
+                isStackable: row?.isStackable ?? opt.isStackable ?? false,
+                maxQuantityPerUser: row?.maxQuantityPerUser ?? opt.maxQuantityPerUser ?? 1,
+              };
             }),
           })),
         })),
@@ -166,7 +173,7 @@ export default function AdminAvatarsPage() {
     }
   };
 
-  const setPriceRow = (rowKey: string, field: 'coins' | 'gems', value: number) => {
+  const setPriceRow = (rowKey: string, field: 'coins' | 'gems' | 'isStackable' | 'maxQuantityPerUser', value: number | boolean) => {
     setPriceRows((prev) => prev.map((r) => (r.rowKey === rowKey ? { ...r, [field]: value } : r)));
   };
 
@@ -334,6 +341,8 @@ export default function AdminAvatarsPage() {
                     <th className="text-left px-2 py-1.5">Label</th>
                     <th className="text-left w-24">Coins</th>
                     <th className="text-left w-24">Gems</th>
+                    <th className="text-left w-20" title="Can buy multiple (e.g. consumables)">Stack</th>
+                    <th className="text-left w-20" title="Max quantity user can own (1 = buy once)">Max</th>
                   </tr>
                 </thead>
                 <tbody className="text-slate-300">
@@ -348,18 +357,42 @@ export default function AdminAvatarsPage() {
                         <input
                           type="number"
                           min={0}
-                          value={r.coins}
-                          onChange={(e) => setPriceRow(r.rowKey, 'coins', parseInt(e.target.value, 10) || 0)}
-                          className="w-20 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-600 text-slate-100"
+                          value={r.coins === 0 ? '' : r.coins}
+                          onChange={(e) => setPriceRow(r.rowKey, 'coins', e.target.value === '' ? 0 : parseInt(e.target.value, 10) || 0)}
+                          placeholder=""
+                          className="w-20 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-600 text-slate-100 placeholder:text-slate-500"
                         />
                       </td>
                       <td className="px-2 py-1">
                         <input
                           type="number"
                           min={0}
-                          value={r.gems}
-                          onChange={(e) => setPriceRow(r.rowKey, 'gems', parseInt(e.target.value, 10) || 0)}
-                          className="w-20 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-600 text-slate-100"
+                          value={r.gems === 0 ? '' : r.gems}
+                          onChange={(e) => setPriceRow(r.rowKey, 'gems', e.target.value === '' ? 0 : parseInt(e.target.value, 10) || 0)}
+                          placeholder=""
+                          className="w-20 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-600 text-slate-100 placeholder:text-slate-500"
+                        />
+                      </td>
+                      <td className="px-2 py-1">
+                        <label className="flex items-center gap-1 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={r.isStackable}
+                            onChange={(e) => setPriceRow(r.rowKey, 'isStackable', e.target.checked)}
+                            className="rounded border-slate-600 bg-slate-900 text-indigo-600"
+                          />
+                          <span className="text-xs">{r.isStackable ? 'Yes' : 'No'}</span>
+                        </label>
+                      </td>
+                      <td className="px-2 py-1">
+                        <input
+                          type="number"
+                          min={1}
+                          value={r.maxQuantityPerUser === 1 ? '' : r.maxQuantityPerUser}
+                          onChange={(e) => setPriceRow(r.rowKey, 'maxQuantityPerUser', e.target.value === '' ? 1 : Math.max(1, parseInt(e.target.value, 10) || 1))}
+                          placeholder="1"
+                          title="1 = buy once"
+                          className="w-16 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-600 text-slate-100 placeholder:text-slate-500"
                         />
                       </td>
                     </tr>
