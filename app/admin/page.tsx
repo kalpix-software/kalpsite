@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import {
   Store, RefreshCw, BarChart3, Package,
-  CalendarCheck, Tag, Swords, Trophy, Gift,
+  CalendarCheck, Tag, Swords, Trophy, Gift, Users,
 } from 'lucide-react';
 
 const cards = [
@@ -15,6 +15,7 @@ const cards = [
   { href: '/admin/battlepass', icon: Swords, title: 'Battle Pass', desc: 'Manage seasons, tiers, and XP rewards', color: 'text-emerald-400' },
   { href: '/admin/achievements', icon: Trophy, title: 'Achievements', desc: 'Track milestones and reward players', color: 'text-amber-400' },
   { href: '/admin/gifts', icon: Gift, title: 'Gifts', desc: 'Monitor gifting activity between users', color: 'text-amber-400' },
+  { href: '/admin/users', icon: Users, title: 'Users', desc: 'Look up users, manage wallets', color: 'text-amber-400' },
   { href: '/admin/stats', icon: BarChart3, title: 'Stats', desc: 'Revenue, purchases, and top items', color: 'text-purple-400' },
 ];
 

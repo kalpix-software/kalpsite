@@ -17,6 +17,9 @@ interface StoreItem {
   price: { coins: number; gems: number };
   isActive: boolean;
   sortOrder?: number;
+  metadata?: Record<string, string>;
+  purchaseLimit?: number;
+  discountPercent?: number;
 }
 
 const callRpc = callAdminRpc;
@@ -79,6 +82,8 @@ function AddItemForm({
     description: '',
     coins: 0,
     gems: 0,
+    purchaseLimit: 1,
+    discountPercent: 0,
     isActive: true,
   });
 
@@ -112,6 +117,11 @@ function AddItemForm({
         price: { coins: form.coins, gems: form.gems },
         isActive: form.isActive,
         stock: -1,
+        discountPercent: form.discountPercent,
+        metadata: {
+          isStackable: form.purchaseLimit > 1 ? 'true' : 'false',
+          maxQuantityPerUser: String(form.purchaseLimit),
+        },
       };
       if (form.upgradeType === 'avatar_upgrade') item.avatarId = category;
       if (form.upgradeType === 'game_upgrade') item.gameId = category;
@@ -127,6 +137,8 @@ function AddItemForm({
         description: '',
         coins: 0,
         gems: 0,
+        purchaseLimit: 1,
+        discountPercent: 0,
         isActive: true,
       });
       onAdded();
@@ -331,6 +343,29 @@ function AddItemForm({
             />
           </div>
         </div>
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">Purchase limit</label>
+          <input
+            type="number"
+            min={1}
+            value={form.purchaseLimit}
+            onChange={(e) => setForm((f) => ({ ...f, purchaseLimit: parseInt(e.target.value) || 1 }))}
+            className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm"
+          />
+          <span className="text-xs text-slate-500">Max quantity a user can own</span>
+        </div>
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">Discount %</label>
+          <input
+            type="number"
+            min={0}
+            max={95}
+            value={form.discountPercent}
+            onChange={(e) => setForm((f) => ({ ...f, discountPercent: Math.min(95, Math.max(0, parseInt(e.target.value) || 0)) }))}
+            className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm"
+          />
+          <span className="text-xs text-slate-500">0 = no discount, 1–95</span>
+        </div>
       </div>
       <input
         value={form.description}
@@ -407,7 +442,17 @@ export default function AdminStorePage() {
   const saveItem = async (item: StoreItem) => {
     setSaving(true);
     try {
-      await callRpc('store/admin_update_item', JSON.stringify(item));
+      const limit = item.purchaseLimit ?? 1;
+      const payload = {
+        ...item,
+        discountPercent: item.discountPercent ?? 0,
+        metadata: {
+          ...(item.metadata ?? {}),
+          isStackable: limit > 1 ? 'true' : 'false',
+          maxQuantityPerUser: String(limit),
+        },
+      };
+      await callRpc('store/admin_update_item', JSON.stringify(payload));
       setEditing(null);
       loadItems();
     } catch (e) {
@@ -531,6 +576,9 @@ export default function AdminStorePage() {
                       {item.price.coins > 0 && item.price.gems > 0 && ' / '}
                       {item.price.gems > 0 && <span className="text-purple-400">{item.price.gems} gems</span>}
                       {item.price.coins === 0 && item.price.gems === 0 && <span className="text-green-400">Free</span>}
+                      {(item.discountPercent ?? 0) > 0 && (
+                        <span className="ml-1 px-1.5 py-0.5 rounded bg-red-600/20 text-red-400 text-xs font-medium">-{item.discountPercent}%</span>
+                      )}
                     </td>
                     <td className="py-2 px-3">
                       <span className={item.isActive ? 'text-green-400' : 'text-red-400'}>{item.isActive ? 'Yes' : 'No'}</span>
@@ -649,6 +697,23 @@ function EditRow({
         value={item.price.gems}
         onChange={(e) => setEditing((prev) => (prev ? { ...prev, price: { ...prev.price, gems: parseInt(e.target.value) || 0 } } : null))}
         className="w-20 px-2 py-1 rounded bg-slate-900 border border-slate-600 text-slate-100 text-sm"
+      />
+      <label className="text-xs text-slate-400">Limit:</label>
+      <input
+        type="number"
+        min={1}
+        value={item.purchaseLimit ?? (item.metadata?.maxQuantityPerUser ? parseInt(item.metadata.maxQuantityPerUser) : 1)}
+        onChange={(e) => setEditing((prev) => (prev ? { ...prev, purchaseLimit: parseInt(e.target.value) || 1 } : null))}
+        className="w-16 px-2 py-1 rounded bg-slate-900 border border-slate-600 text-slate-100 text-sm"
+      />
+      <label className="text-xs text-slate-400">Discount%:</label>
+      <input
+        type="number"
+        min={0}
+        max={95}
+        value={item.discountPercent ?? 0}
+        onChange={(e) => setEditing((prev) => (prev ? { ...prev, discountPercent: Math.min(95, Math.max(0, parseInt(e.target.value) || 0)) } : null))}
+        className="w-16 px-2 py-1 rounded bg-slate-900 border border-slate-600 text-slate-100 text-sm"
       />
       <label className="text-xs text-slate-400">Active:</label>
       <input

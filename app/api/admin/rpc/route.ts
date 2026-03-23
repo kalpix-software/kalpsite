@@ -42,6 +42,8 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   'store/accept_gift',
   'store/decline_gift',
   // Store – admin only
+  'store/admin_get_wallet',
+  'store/add_currency',
   'store/admin_create_deal',
   'store/admin_get_item_stats',
   'store/admin_add_item',
