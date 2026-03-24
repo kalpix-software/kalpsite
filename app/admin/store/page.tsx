@@ -18,8 +18,10 @@ interface StoreItem {
   isActive: boolean;
   sortOrder?: number;
   metadata?: Record<string, string>;
+  previewUrl?: string;
   purchaseLimit?: number;
-  discountPercent?: number;
+  discountedPriceCoins?: number;
+  discountedPriceGems?: number;
 }
 
 const callRpc = callAdminRpc;
@@ -80,10 +82,12 @@ function AddItemForm({
     subcategoryCustom: '',
     name: '',
     description: '',
+    previewUrl: '',
     coins: 0,
     gems: 0,
     purchaseLimit: 1,
-    discountPercent: 0,
+    discountedPriceCoins: 0,
+    discountedPriceGems: 0,
     isActive: true,
   });
 
@@ -110,6 +114,7 @@ function AddItemForm({
         itemId,
         name: form.name,
         description: form.description,
+        previewUrl: form.previewUrl || undefined,
         upgradeType: form.upgradeType,
         category,
         subcategory,
@@ -117,7 +122,8 @@ function AddItemForm({
         price: { coins: form.coins, gems: form.gems },
         isActive: form.isActive,
         stock: -1,
-        discountPercent: form.discountPercent,
+        discountedPriceCoins: form.discountedPriceCoins,
+        discountedPriceGems: form.discountedPriceGems,
         metadata: {
           isStackable: form.purchaseLimit > 1 ? 'true' : 'false',
           maxQuantityPerUser: String(form.purchaseLimit),
@@ -135,10 +141,12 @@ function AddItemForm({
         subcategoryCustom: '',
         name: '',
         description: '',
+        previewUrl: '',
         coins: 0,
         gems: 0,
         purchaseLimit: 1,
-        discountPercent: 0,
+        discountedPriceCoins: 0,
+        discountedPriceGems: 0,
         isActive: true,
       });
       onAdded();
@@ -355,22 +363,38 @@ function AddItemForm({
           <span className="text-xs text-slate-500">Max quantity a user can own</span>
         </div>
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Discount %</label>
+          <label className="block text-xs text-slate-400 mb-1">Discounted Price Coins</label>
           <input
             type="number"
             min={0}
-            max={95}
-            value={form.discountPercent}
-            onChange={(e) => setForm((f) => ({ ...f, discountPercent: Math.min(95, Math.max(0, parseInt(e.target.value) || 0)) }))}
+            value={form.discountedPriceCoins}
+            onChange={(e) => setForm((f) => ({ ...f, discountedPriceCoins: Math.max(0, parseInt(e.target.value) || 0) }))}
             className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm"
           />
-          <span className="text-xs text-slate-500">0 = no discount, 1–95</span>
+          <span className="text-xs text-slate-500">0 = no discount</span>
+        </div>
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">Discounted Price Gems</label>
+          <input
+            type="number"
+            min={0}
+            value={form.discountedPriceGems}
+            onChange={(e) => setForm((f) => ({ ...f, discountedPriceGems: Math.max(0, parseInt(e.target.value) || 0) }))}
+            className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm"
+          />
+          <span className="text-xs text-slate-500">0 = no discount</span>
         </div>
       </div>
       <input
         value={form.description}
         onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
         placeholder="Description (optional)"
+        className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm"
+      />
+      <input
+        value={form.previewUrl}
+        onChange={(e) => setForm((f) => ({ ...f, previewUrl: e.target.value }))}
+        placeholder="Preview URL (optional)"
         className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm"
       />
       {error && <p className="text-sm text-red-400">{error}</p>}
@@ -406,8 +430,9 @@ export default function AdminStorePage() {
         upgradeType: filter.upgradeType || undefined,
         category: filter.category || undefined,
         subcategory: filter.subcategory || undefined,
+        includeInactive: true,
         limit: pageSize,
-        offset,
+        cursor: offset > 0 ? btoa(String(offset)) : undefined,
       });
       const data = await callRpc('store/get_items', payload) as { data?: { items?: StoreItem[]; total?: number }; items?: StoreItem[]; total?: number };
       const raw = data?.data ?? data;
@@ -445,7 +470,10 @@ export default function AdminStorePage() {
       const limit = item.purchaseLimit ?? 1;
       const payload = {
         ...item,
-        discountPercent: item.discountPercent ?? 0,
+        stock: -1, // always unlimited from admin
+        isActive: item.isActive ?? true,
+        discountedPriceCoins: item.discountedPriceCoins ?? 0,
+        discountedPriceGems: item.discountedPriceGems ?? 0,
         metadata: {
           ...(item.metadata ?? {}),
           isStackable: limit > 1 ? 'true' : 'false',
@@ -576,8 +604,10 @@ export default function AdminStorePage() {
                       {item.price.coins > 0 && item.price.gems > 0 && ' / '}
                       {item.price.gems > 0 && <span className="text-purple-400">{item.price.gems} gems</span>}
                       {item.price.coins === 0 && item.price.gems === 0 && <span className="text-green-400">Free</span>}
-                      {(item.discountPercent ?? 0) > 0 && (
-                        <span className="ml-1 px-1.5 py-0.5 rounded bg-red-600/20 text-red-400 text-xs font-medium">-{item.discountPercent}%</span>
+                      {((item.discountedPriceCoins ?? 0) > 0 || (item.discountedPriceGems ?? 0) > 0) && (
+                        <span className="ml-1 px-1.5 py-0.5 rounded bg-red-600/20 text-red-400 text-xs font-medium">
+                          Sale: {(item.discountedPriceCoins ?? 0) > 0 ? `${item.discountedPriceCoins} coins` : ''}{(item.discountedPriceCoins ?? 0) > 0 && (item.discountedPriceGems ?? 0) > 0 ? ' / ' : ''}{(item.discountedPriceGems ?? 0) > 0 ? `${item.discountedPriceGems} gems` : ''}
+                        </span>
                       )}
                     </td>
                     <td className="py-2 px-3">
@@ -682,6 +712,12 @@ function EditRow({
   return (
     <div className="flex flex-wrap gap-3 items-center">
       <span className="text-xs text-slate-400 w-full">{item.name} — {item.itemId}</span>
+      <input
+        value={item.previewUrl ?? ''}
+        onChange={(e) => setEditing((prev) => (prev ? { ...prev, previewUrl: e.target.value } : null))}
+        placeholder="Preview URL"
+        className="w-full px-2 py-1 rounded bg-slate-900 border border-slate-600 text-slate-100 text-sm"
+      />
       <label className="text-xs text-slate-400">Coins:</label>
       <input
         type="number"
@@ -706,14 +742,21 @@ function EditRow({
         onChange={(e) => setEditing((prev) => (prev ? { ...prev, purchaseLimit: parseInt(e.target.value) || 1 } : null))}
         className="w-16 px-2 py-1 rounded bg-slate-900 border border-slate-600 text-slate-100 text-sm"
       />
-      <label className="text-xs text-slate-400">Discount%:</label>
+      <label className="text-xs text-slate-400">Sale Coins:</label>
       <input
         type="number"
         min={0}
-        max={95}
-        value={item.discountPercent ?? 0}
-        onChange={(e) => setEditing((prev) => (prev ? { ...prev, discountPercent: Math.min(95, Math.max(0, parseInt(e.target.value) || 0)) } : null))}
-        className="w-16 px-2 py-1 rounded bg-slate-900 border border-slate-600 text-slate-100 text-sm"
+        value={item.discountedPriceCoins ?? 0}
+        onChange={(e) => setEditing((prev) => (prev ? { ...prev, discountedPriceCoins: Math.max(0, parseInt(e.target.value) || 0) } : null))}
+        className="w-20 px-2 py-1 rounded bg-slate-900 border border-slate-600 text-slate-100 text-sm"
+      />
+      <label className="text-xs text-slate-400">Sale Gems:</label>
+      <input
+        type="number"
+        min={0}
+        value={item.discountedPriceGems ?? 0}
+        onChange={(e) => setEditing((prev) => (prev ? { ...prev, discountedPriceGems: Math.max(0, parseInt(e.target.value) || 0) } : null))}
+        className="w-20 px-2 py-1 rounded bg-slate-900 border border-slate-600 text-slate-100 text-sm"
       />
       <label className="text-xs text-slate-400">Active:</label>
       <input
