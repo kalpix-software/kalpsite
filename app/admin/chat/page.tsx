@@ -352,6 +352,23 @@ export default function AdminChatPage() {
     fetchMessages(selectedConvo.conversationId, nextCursor, true);
   }, [selectedConvo, nextCursor, loadingMore, fetchMessages]);
 
+  // ------ Bot presence: mark bots online while admin is on this page ------
+
+  useEffect(() => {
+    const setOnline = (online: boolean) => {
+      callAdminRpc('admin/set_bots_online_status', JSON.stringify({ online })).catch(() => {});
+    };
+    // Mark bots online on mount
+    setOnline(true);
+    // Heartbeat every 20s to keep bots online (presence monitor runs every 30s)
+    const heartbeat = setInterval(() => setOnline(true), 20_000);
+    // Mark bots offline on unmount
+    return () => {
+      clearInterval(heartbeat);
+      setOnline(false);
+    };
+  }, []);
+
   // ------ Polling ------
 
   useEffect(() => {
