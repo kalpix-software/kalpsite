@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import {
   Send, RefreshCw, MessageSquare, Bot, User, Search,
   Image as ImageIcon, Film, FileText, Music, Smile, Paperclip,
+  Trash2, X,
 } from 'lucide-react';
 import { Client, Session } from '@heroiclabs/nakama-js';
 import { callAdminRpc } from '@/lib/admin-rpc';
@@ -280,6 +281,10 @@ export default function AdminChatPage() {
   const [pickerPosition, setPickerPosition] = useState<{ left: number; top: number } | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -611,10 +616,50 @@ export default function AdminChatPage() {
   }, [selectedConvo, newMessage, replyingTo, sending, fetchMessages, scrollToBottom]);
 
   const selectConversation = (convo: Conversation) => {
+    if (selectMode) {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        if (next.has(convo.conversationId)) next.delete(convo.conversationId);
+        else next.add(convo.conversationId);
+        return next;
+      });
+      return;
+    }
     setSelectedConvo(convo);
     setMessages([]);
     setNextCursor(null);
     setReplyingTo(null);
+  };
+
+  const handleDeleteConversations = async () => {
+    if (selectedIds.size === 0) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await callAdminRpc('admin/delete_fake_user_conversations', JSON.stringify({
+        channelIds: Array.from(selectedIds),
+      }));
+      // If the currently viewed conversation was deleted, clear it
+      if (selectedConvo && selectedIds.has(selectedConvo.conversationId)) {
+        setSelectedConvo(null);
+        setMessages([]);
+      }
+      setSelectedIds(new Set());
+      setSelectMode(false);
+      setConfirmDelete(false);
+      await fetchConversations();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete conversations';
+      setError(msg);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+    setConfirmDelete(false);
   };
 
   const messageGroups = groupMessagesByDate(messages);
@@ -668,17 +713,53 @@ export default function AdminChatPage() {
       <div className="w-80 border-r border-slate-700 flex flex-col bg-slate-900/50">
         <div className="p-4 border-b border-slate-700">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
-              <MessageSquare className="w-5 h-5 text-indigo-400" />
-              Bot Chats
-            </h2>
-            <button
-              onClick={fetchConversations}
-              className="p-1.5 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
-              title="Refresh"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
+            {selectMode ? (
+              <>
+                <span className="text-sm text-slate-300 font-medium">
+                  {selectedIds.size} selected
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setConfirmDelete(true)}
+                    disabled={selectedIds.size === 0 || deleting}
+                    className="p-1.5 rounded-lg hover:bg-red-600/20 text-red-400 hover:text-red-300 transition disabled:opacity-30"
+                    title="Delete selected"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={exitSelectMode}
+                    className="p-1.5 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
+                    title="Cancel"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
+                  <MessageSquare className="w-5 h-5 text-indigo-400" />
+                  Bot Chats
+                </h2>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setSelectMode(true)}
+                    className="p-1.5 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
+                    title="Select conversations to delete"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={fetchConversations}
+                    className="p-1.5 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
+                    title="Refresh"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                </div>
+              </>
+            )}
           </div>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
@@ -709,10 +790,25 @@ export default function AdminChatPage() {
                 key={convo.conversationId}
                 onClick={() => selectConversation(convo)}
                 className={`w-full text-left p-3 border-b border-slate-800 hover:bg-slate-800/60 transition ${
-                  selectedConvo?.conversationId === convo.conversationId ? 'bg-slate-800' : ''
-                }`}
+                  selectedConvo?.conversationId === convo.conversationId && !selectMode ? 'bg-slate-800' : ''
+                } ${selectMode && selectedIds.has(convo.conversationId) ? 'bg-red-900/20' : ''}`}
               >
                 <div className="flex items-start gap-3">
+                  {selectMode && (
+                    <div className="flex items-center justify-center shrink-0 pt-2">
+                      <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition ${
+                        selectedIds.has(convo.conversationId)
+                          ? 'bg-red-500 border-red-500'
+                          : 'border-slate-500'
+                      }`}>
+                        {selectedIds.has(convo.conversationId) && (
+                          <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shrink-0">
                     <User className="w-5 h-5 text-white" />
                   </div>
@@ -1018,6 +1114,34 @@ export default function AdminChatPage() {
           </>
         )}
       </div>
+
+      {/* Delete confirmation dialog */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 max-w-sm w-full">
+            <h3 className="text-lg font-semibold text-slate-100 mb-2">Delete Conversations</h3>
+            <p className="text-sm text-slate-400 mb-4">
+              Are you sure you want to delete {selectedIds.size} conversation{selectedIds.size > 1 ? 's' : ''}? This will remove all messages and cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmDelete(false)}
+                disabled={deleting}
+                className="px-4 py-2 rounded-lg text-sm text-slate-300 hover:bg-slate-700 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteConversations}
+                disabled={deleting}
+                className="px-4 py-2 rounded-lg text-sm bg-red-600 hover:bg-red-500 text-white font-medium transition disabled:opacity-50"
+              >
+                {deleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
