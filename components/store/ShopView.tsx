@@ -94,22 +94,12 @@ export default function ShopView({ onAddToCart }: ShopViewProps) {
                 {item.category}{item.subcategory ? ` · ${item.subcategory}` : ''}
               </p>
               <div className="mt-2 flex gap-2 flex-wrap">
-                {item.price.coins > 0 && (
-                  <button
-                    onClick={() => onAddToCart(item, 1, 'coins')}
-                    className="px-2 py-1 rounded bg-amber-600/80 hover:bg-amber-600 text-white text-xs"
-                  >
-                    {item.price.coins} coins
-                  </button>
-                )}
-                {item.price.gems > 0 && (
-                  <button
-                    onClick={() => onAddToCart(item, 1, 'gems')}
-                    className="px-2 py-1 rounded bg-indigo-600/80 hover:bg-indigo-600 text-white text-xs"
-                  >
-                    {item.price.gems} gems
-                  </button>
-                )}
+                <button
+                  onClick={() => onAddToCart(item, 1, item.currencyType)}
+                  className={`px-2 py-1 rounded text-white text-xs ${item.currencyType === 'gems' ? 'bg-indigo-600/80 hover:bg-indigo-600' : 'bg-amber-600/80 hover:bg-amber-600'}`}
+                >
+                  {item.price} {item.currencyType}
+                </button>
               </div>
             </div>
           ))}

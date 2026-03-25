@@ -22,8 +22,13 @@ export interface StoreItem {
   subcategory?: string;
   iconUrl?: string;
   previewUrl?: string;
-  price: Price;
+  currencyType: string;
+  price: number;
+  discountedPrice?: number;
+  quantityAvailable?: number;
+  quantityAddedToCart?: number;
   isActive: boolean;
+  isOwned?: boolean;
 }
 
 export interface StoreDeal {

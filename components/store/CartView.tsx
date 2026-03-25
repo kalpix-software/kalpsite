@@ -34,10 +34,10 @@ export default function CartView({ cart, onClose, onRemove, onCheckoutSuccess }:
 
   const totalCoins = cart
     .filter((c) => c.currencyType === 'coins')
-    .reduce((s, c) => s + c.item.price.coins * c.quantity, 0);
+    .reduce((s, c) => s + c.item.price * c.quantity, 0);
   const totalGems = cart
     .filter((c) => c.currencyType === 'gems')
-    .reduce((s, c) => s + c.item.price.gems * c.quantity, 0);
+    .reduce((s, c) => s + c.item.price * c.quantity, 0);
 
   const handleCheckout = async () => {
     if (cart.length === 0) return;
@@ -84,10 +84,7 @@ export default function CartView({ cart, onClose, onRemove, onCheckoutSuccess }:
                 <div>
                   <p className="font-medium text-slate-200">{line.item.name}</p>
                   <p className="text-xs text-slate-400">
-                    {line.currencyType === 'coins'
-                      ? `${line.item.price.coins * line.quantity} coins`
-                      : `${line.item.price.gems * line.quantity} gems`}{' '}
-                    × {line.quantity}
+                    {line.item.price * line.quantity} {line.currencyType} × {line.quantity}
                   </p>
                 </div>
                 <button
