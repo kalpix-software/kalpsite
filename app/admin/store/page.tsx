@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
-import { callAdminRpc } from '@/lib/admin-rpc';
+import { callAdminRpc, unwrapAdminRpcData } from '@/lib/admin-rpc';
 
 interface StoreItem {
   itemId: string;
@@ -52,6 +52,93 @@ const CHAT_CATEGORIES = [
   { value: 'emoji_pack', label: 'Emoji pack' },
   { value: 'theme_pack', label: 'Theme pack' },
 ];
+
+const UPGRADE_TYPE_TO_ITEM_TYPE: Record<string, string> = {
+  game_upgrade: 'game_item',
+  chat_upgrade: 'chat_item',
+  avatar_upgrade: 'avatar_preview',
+};
+
+function R2ImageUploader({
+  value,
+  onChange,
+  upgradeType,
+  category,
+  subcategory,
+}: {
+  value: string;
+  onChange: (url: string) => void;
+  upgradeType: string;
+  category: string;
+  subcategory: string;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = async (file: File) => {
+    const allowed = ['image/webp', 'image/png', 'image/jpeg', 'image/gif'];
+    if (!allowed.includes(file.type)) {
+      setUploadError('Only WebP, PNG, JPEG, GIF allowed');
+      return;
+    }
+    setUploading(true);
+    setUploadError('');
+    try {
+      const itemType = UPGRADE_TYPE_TO_ITEM_TYPE[upgradeType] || 'game_item';
+      const raw = await callAdminRpc(
+        'store/admin_get_upload_url',
+        JSON.stringify({ itemType, category: category || 'unknown', subcategory: subcategory || 'unknown', contentType: file.type }),
+      );
+      const data = unwrapAdminRpcData<{ uploadUrl: string; publicUrl: string }>(raw);
+      if (!data.uploadUrl || !data.publicUrl) {
+        throw new Error('Invalid upload URL response');
+      }
+      await fetch(data.uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+      onChange(data.publicUrl);
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-3">
+        {value ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={value} alt="preview" className="h-12 w-12 object-cover rounded border border-slate-600 flex-shrink-0" />
+        ) : (
+          <div className="h-12 w-12 rounded border border-dashed border-slate-500 flex items-center justify-center text-slate-500 text-xs flex-shrink-0">
+            img
+          </div>
+        )}
+        <button
+          type="button"
+          disabled={uploading}
+          onClick={() => inputRef.current?.click()}
+          className="text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-50"
+        >
+          {uploading ? 'Uploading…' : value ? 'Replace' : 'Upload image'}
+        </button>
+        {value && <span className="text-xs text-slate-500 truncate max-w-[200px]">{value.split('/').pop()}</span>}
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/webp,image/png,image/jpeg,image/gif"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) handleFile(file);
+          e.target.value = '';
+        }}
+      />
+      {uploadError && <p className="text-xs text-red-400">{uploadError}</p>}
+    </div>
+  );
+}
 
 function generateId(): string {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -125,8 +212,7 @@ function AddItemForm({
         discountedPriceCoins: form.discountedPriceCoins,
         discountedPriceGems: form.discountedPriceGems,
         metadata: {
-          isStackable: form.purchaseLimit > 1 ? 'true' : 'false',
-          maxQuantityPerUser: String(form.purchaseLimit),
+          purchaseLimit: String(form.purchaseLimit),
         },
       };
       if (form.upgradeType === 'avatar_upgrade') item.avatarId = category;
@@ -391,12 +477,16 @@ function AddItemForm({
         placeholder="Description (optional)"
         className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm"
       />
-      <input
-        value={form.previewUrl}
-        onChange={(e) => setForm((f) => ({ ...f, previewUrl: e.target.value }))}
-        placeholder="Preview URL (optional)"
-        className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm"
-      />
+      <div>
+        <label className="block text-xs text-slate-400 mb-1">Preview image</label>
+        <R2ImageUploader
+          value={form.previewUrl}
+          onChange={(url) => setForm((f) => ({ ...f, previewUrl: url }))}
+          upgradeType={form.upgradeType}
+          category={form.category === '__other__' ? form.categoryCustom.trim() : form.category}
+          subcategory={form.subcategory === '__other__' ? form.subcategoryCustom.trim() : (form.subcategoryCustom.trim() || form.subcategory)}
+        />
+      </div>
       {error && <p className="text-sm text-red-400">{error}</p>}
       <div className="flex gap-2">
         <button type="submit" disabled={saving} className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium disabled:opacity-50">
@@ -468,6 +558,8 @@ export default function AdminStorePage() {
     setSaving(true);
     try {
       const limit = item.purchaseLimit ?? 1;
+      const prev = item.metadata ?? {};
+      const { isStackable: _s, maxQuantityPerUser: _m, ...restMeta } = prev;
       const payload = {
         ...item,
         stock: -1, // always unlimited from admin
@@ -475,9 +567,8 @@ export default function AdminStorePage() {
         discountedPriceCoins: item.discountedPriceCoins ?? 0,
         discountedPriceGems: item.discountedPriceGems ?? 0,
         metadata: {
-          ...(item.metadata ?? {}),
-          isStackable: limit > 1 ? 'true' : 'false',
-          maxQuantityPerUser: String(limit),
+          ...restMeta,
+          purchaseLimit: String(limit),
         },
       };
       await callRpc('store/admin_update_item', JSON.stringify(payload));
@@ -712,12 +803,15 @@ function EditRow({
   return (
     <div className="flex flex-wrap gap-3 items-center">
       <span className="text-xs text-slate-400 w-full">{item.name} — {item.itemId}</span>
-      <input
-        value={item.previewUrl ?? ''}
-        onChange={(e) => setEditing((prev) => (prev ? { ...prev, previewUrl: e.target.value } : null))}
-        placeholder="Preview URL"
-        className="w-full px-2 py-1 rounded bg-slate-900 border border-slate-600 text-slate-100 text-sm"
-      />
+      <div className="w-full">
+        <R2ImageUploader
+          value={item.previewUrl ?? ''}
+          onChange={(url) => setEditing((prev) => (prev ? { ...prev, previewUrl: url } : null))}
+          upgradeType={item.upgradeType ?? ''}
+          category={item.category ?? ''}
+          subcategory={item.type ?? item.subcategory ?? ''}
+        />
+      </div>
       <label className="text-xs text-slate-400">Coins:</label>
       <input
         type="number"
@@ -738,7 +832,14 @@ function EditRow({
       <input
         type="number"
         min={1}
-        value={item.purchaseLimit ?? (item.metadata?.maxQuantityPerUser ? parseInt(item.metadata.maxQuantityPerUser) : 1)}
+        value={
+          item.purchaseLimit ??
+          (item.metadata?.purchaseLimit
+            ? parseInt(item.metadata.purchaseLimit, 10)
+            : item.metadata?.maxQuantityPerUser
+              ? parseInt(item.metadata.maxQuantityPerUser, 10)
+              : 1)
+        }
         onChange={(e) => setEditing((prev) => (prev ? { ...prev, purchaseLimit: parseInt(e.target.value) || 1 } : null))}
         className="w-16 px-2 py-1 rounded bg-slate-900 border border-slate-600 text-slate-100 text-sm"
       />

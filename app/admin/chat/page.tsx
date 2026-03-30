@@ -74,6 +74,14 @@ function timeAgo(ts: number): string {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
+async function sha256HexFromFile(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  const hash = await crypto.subtle.digest('SHA-256', buf);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 function lastSeenText(isOnline?: boolean, lastSeenAt?: number): string {
   if (isOnline) return 'Online';
   if (!lastSeenAt) return 'Offline';
@@ -585,27 +593,33 @@ export default function AdminChatPage() {
     setSending(true);
     try {
       const filesList = Array.from(files);
+      const digests = await Promise.all(filesList.map((f) => sha256HexFromFile(f)));
       const res = await callAdminRpc('social/upload_media', JSON.stringify({
         context: 'chat',
-        files: filesList.map(f => ({
+        files: filesList.map((f, i) => ({
           fileName: f.name,
           contentType: f.type || 'application/octet-stream',
+          contentSha256: digests[i],
         })),
       }));
       const uploads =
-        (res.data as { uploads?: { uploadUrl: string; key: string; mediaUrl: string }[] } | undefined)?.uploads ??
-        (res as { uploads?: { uploadUrl: string; key: string; mediaUrl: string }[] }).uploads ??
+        (res.data as { uploads?: { uploadUrl: string; key: string; mediaUrl: string; deduplicated?: boolean; putHeaders?: Record<string, string> }[] } | undefined)?.uploads ??
+        (res as { uploads?: { uploadUrl: string; key: string; mediaUrl: string; deduplicated?: boolean; putHeaders?: Record<string, string> }[] }).uploads ??
         [];
       if (uploads.length !== filesList.length) {
         throw new Error('Upload slots count mismatch');
       }
       for (let i = 0; i < uploads.length; i++) {
-        const { uploadUrl } = uploads[i];
+        const slot = uploads[i];
+        if (slot.deduplicated) continue;
         const file = filesList[i];
-        const putRes = await fetch(uploadUrl, {
+        const putRes = await fetch(slot.uploadUrl, {
           method: 'PUT',
           body: file,
-          headers: { 'Content-Type': file.type || 'application/octet-stream' },
+          headers: {
+            'Content-Type': file.type || 'application/octet-stream',
+            ...(slot.putHeaders ?? {}),
+          },
         });
         if (!putRes.ok) {
           throw new Error(`Upload failed: ${putRes.status}`);

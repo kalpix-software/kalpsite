@@ -50,10 +50,12 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   'store/admin_add_item',
   'store/admin_update_item',
   'store/admin_delete_item',
+  'store/admin_get_upload_url',
   'store/admin_add_bundle',
   'store/admin_delete_bundle',
   'avatar/admin_list_avatars',
   'avatar/admin_set_avatar_active',
+  'avatar/admin_set_option_preview',
   'avatar/sync_avatars',
 ]);
 

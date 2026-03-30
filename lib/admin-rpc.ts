@@ -32,3 +32,11 @@ export async function callAdminRpc(rpcId: string, payload: string = '{}'): Promi
   }
   return data;
 }
+
+/**
+ * RPC payloads may be either the inner object or wrapped as { data: T } depending on the proxy path.
+ */
+export function unwrapAdminRpcData<T>(raw: unknown): T {
+  const o = raw as { data?: unknown };
+  return (o?.data !== undefined ? o.data : raw) as T;
+}
