@@ -124,10 +124,9 @@ function buildCatalogFromSpine(spineJson: SpineAsset, slug: string): CatalogCate
         options: all[k].map((oid) => ({
           optionId: oid,
           label: humanize(oid),
-          ...(isAnimation ? {} : {
-            skinName: `${k}/${oid}`,
-            previewUrl: `avatars/${slug}/previews/${k}/${oid}.webp`,
-          }),
+          ...(!isAnimation ? { skinName: `${k}/${oid}` } : {}),
+          // Same path pattern as cosmetic previews so R2 uploads (subcategory/optionId.webp) match after sync.
+          previewUrl: `avatars/${slug}/previews/${k}/${oid}.webp`,
         })),
       });
     }
@@ -140,10 +139,8 @@ function buildCatalogFromSpine(spineJson: SpineAsset, slug: string): CatalogCate
         options: opts.map((oid) => ({
           optionId: oid,
           label: humanize(oid),
-          ...(isAnimation ? {} : {
-            skinName: `${k}/${oid}`,
-            previewUrl: `avatars/${slug}/previews/${k}/${oid}.webp`,
-          }),
+          ...(!isAnimation ? { skinName: `${k}/${oid}` } : {}),
+          previewUrl: `avatars/${slug}/previews/${k}/${oid}.webp`,
         })),
       });
     }
