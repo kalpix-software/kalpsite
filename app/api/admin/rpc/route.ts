@@ -57,6 +57,9 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   'avatar/admin_set_avatar_active',
   'avatar/admin_set_option_preview',
   'avatar/sync_avatars',
+  // User reports – admin only
+  'chat/admin_list_user_reports',
+  'chat/admin_update_report_status',
 ]);
 
 /**
