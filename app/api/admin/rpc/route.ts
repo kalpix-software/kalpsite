@@ -60,6 +60,9 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   // User reports – admin only
   'chat/admin_list_user_reports',
   'chat/admin_update_report_status',
+  // Message reports – admin only
+  'chat/admin_list_message_reports',
+  'chat/admin_update_message_report_status',
 ]);
 
 /**
