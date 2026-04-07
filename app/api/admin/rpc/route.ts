@@ -58,6 +58,9 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   'avatar/admin_set_option_preview',
   'avatar/sync_avatars',
   'avatar/get_character_catalog',
+  'admin/set_bots_online_status',
+  'admin/seed_fake_users',
+  'admin/get_fake_users',
   // User reports – admin only
   'chat/admin_list_user_reports',
   'chat/admin_update_report_status',

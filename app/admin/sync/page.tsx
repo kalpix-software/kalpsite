@@ -659,6 +659,19 @@ export default function AdminAvatarsPage() {
         Upload Spine assets (.json + .txt atlas + .webp) to auto-generate a catalog from skin names (.atlas atlas still supported). Set prices and save to the database. Then upload preview images for each option.
       </p>
 
+      {/* Step guide */}
+      <div className="max-w-5xl mb-4 p-3 rounded-xl bg-slate-800 border border-slate-700 text-xs text-slate-400">
+        <span className="font-semibold text-slate-300">Required order: </span>
+        <span className="text-indigo-400 font-medium">① Upload Spine Assets</span>
+        {' → '}
+        <span className="text-indigo-400 font-medium">② Confirm Category Assignments</span>
+        {' → '}
+        <span className="text-indigo-400 font-medium">③ Set Prices &amp; Save to Database</span>
+        {' → '}
+        <span className="text-indigo-400 font-medium">④ Upload Option Preview Images</span>
+        <span className="ml-2 text-slate-500">(preview images require the catalog to be saved first)</span>
+      </div>
+
       <div className="max-w-5xl space-y-4">
         {/* ─── Avatar list ─── */}
         <div className="p-4 rounded-xl bg-slate-800 border border-slate-700">
@@ -744,89 +757,6 @@ export default function AdminAvatarsPage() {
           </button>
           {uploadStatus.result && <p className="mt-2 text-sm text-green-400">{uploadStatus.result}</p>}
           {uploadStatus.error && <p className="mt-2 text-sm text-red-400">{uploadStatus.error}</p>}
-        </div>
-
-        {/* ─── Preview images ─── */}
-        <div className="p-4 rounded-xl bg-slate-800 border border-slate-700">
-          <h2 className="font-medium text-slate-100 mb-2 flex items-center gap-2">
-            <Image className="w-4 h-4" />
-            Upload option preview image
-          </h2>
-          <p className="text-slate-400 text-xs mb-3">
-            Select the avatar, subcategory, and option from the catalog. The file will be uploaded to R2 as <code className="bg-slate-700 px-1 rounded">avatars/&#123;slug&#125;/previews/&#123;subcategory&#125;/&#123;optionId&#125;.webp</code> and the catalog URL will be updated.
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-            {/* Avatar slug: pick from list or use current */}
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">Avatar</label>
-              <select
-                value={previewSlug}
-                onChange={(e) => { setPreviewSlug(e.target.value); if (e.target.value) loadCatalogForPreview(e.target.value); }}
-                className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm"
-              >
-                <option value="">Select avatar...</option>
-                {listAvatars.map((a) => (
-                  <option key={a.slug} value={a.slug}>{a.avatarName} ({a.slug})</option>
-                ))}
-              </select>
-            </div>
-            {/* Subcategory dropdown */}
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">Subcategory</label>
-              <select
-                value={previewSubcategory}
-                onChange={(e) => { setPreviewSubcategory(e.target.value); setPreviewOptionId(''); }}
-                disabled={previewCatalog.length === 0}
-                className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm disabled:opacity-50"
-              >
-                <option value="">Select subcategory...</option>
-                {previewCatalog.flatMap((cat) =>
-                  cat.subcategories.map((sub) => (
-                    <option key={sub.key} value={sub.key}>{sub.label || sub.key} ({cat.label})</option>
-                  ))
-                )}
-              </select>
-            </div>
-            {/* Option dropdown */}
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">Option</label>
-              <select
-                value={previewOptionId}
-                onChange={(e) => setPreviewOptionId(e.target.value)}
-                disabled={!previewSubcategory}
-                className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm disabled:opacity-50"
-              >
-                <option value="">Select option...</option>
-                {previewCatalog.flatMap((cat) =>
-                  cat.subcategories
-                    .filter((sub) => sub.key === previewSubcategory)
-                    .flatMap((sub) => sub.options.map((opt) => (
-                      <option key={opt.optionId} value={opt.optionId}>{opt.label} ({opt.optionId})</option>
-                    )))
-                )}
-              </select>
-            </div>
-            {/* File input */}
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">Image file (any name, will be saved as {previewOptionId || 'optionId'}.webp)</label>
-              <input
-                ref={previewFileRef}
-                type="file"
-                accept="image/webp,image/png,image/jpeg,image/gif"
-                className="w-full text-sm text-slate-300 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600"
-              />
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={handlePreviewImageUpload}
-            disabled={previewUploading}
-            className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
-          >
-            {previewUploading ? 'Uploading…' : 'Upload preview to R2'}
-          </button>
-          {previewUploadStatus.result && <p className="mt-2 text-sm text-green-400 break-all">{previewUploadStatus.result}</p>}
-          {previewUploadStatus.error && <p className="mt-2 text-sm text-red-400">{previewUploadStatus.error}</p>}
         </div>
 
         {/* ─── Category assignment step ─── */}
@@ -1017,6 +947,90 @@ export default function AdminAvatarsPage() {
             {saveStatus.error && <p className="mt-2 text-sm text-red-400">{saveStatus.error}</p>}
           </div>
         )}
+
+        {/* ─── Preview images (step 4 — requires catalog saved first) ─── */}
+        <div className="p-4 rounded-xl bg-slate-800 border border-slate-700">
+          <h2 className="font-medium text-slate-100 mb-2 flex items-center gap-2">
+            <Image className="w-4 h-4" />
+            Upload option preview image
+          </h2>
+          <p className="text-slate-400 text-xs mb-3">
+            Upload a preview image for each option. The catalog must be saved first (step 3 above). The file will be uploaded to R2 as <code className="bg-slate-700 px-1 rounded">avatars/&#123;slug&#125;/previews/&#123;subcategory&#125;/&#123;optionId&#125;.webp</code> and the catalog URL will be updated.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+            {/* Avatar slug: pick from list or use current */}
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Avatar</label>
+              <select
+                value={previewSlug}
+                onChange={(e) => { setPreviewSlug(e.target.value); if (e.target.value) loadCatalogForPreview(e.target.value); }}
+                className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm"
+              >
+                <option value="">Select avatar...</option>
+                {listAvatars.map((a) => (
+                  <option key={a.slug} value={a.slug}>{a.avatarName} ({a.slug})</option>
+                ))}
+              </select>
+            </div>
+            {/* Subcategory dropdown */}
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Subcategory</label>
+              <select
+                value={previewSubcategory}
+                onChange={(e) => { setPreviewSubcategory(e.target.value); setPreviewOptionId(''); }}
+                disabled={previewCatalog.length === 0}
+                className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm disabled:opacity-50"
+              >
+                <option value="">Select subcategory...</option>
+                {previewCatalog.flatMap((cat) =>
+                  cat.subcategories.map((sub) => (
+                    <option key={sub.key} value={sub.key}>{sub.label || sub.key} ({cat.label})</option>
+                  ))
+                )}
+              </select>
+            </div>
+            {/* Option dropdown */}
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Option</label>
+              <select
+                value={previewOptionId}
+                onChange={(e) => setPreviewOptionId(e.target.value)}
+                disabled={!previewSubcategory}
+                className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm disabled:opacity-50"
+              >
+                <option value="">Select option...</option>
+                {previewCatalog.flatMap((cat) =>
+                  cat.subcategories
+                    .filter((sub) => sub.key === previewSubcategory)
+                    .flatMap((sub) => sub.options.map((opt) => (
+                      <option key={opt.optionId} value={opt.optionId}>{opt.label} ({opt.optionId})</option>
+                    )))
+                )}
+              </select>
+            </div>
+            {/* File input */}
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Image file (any name, will be saved as {previewOptionId || 'optionId'}.webp)</label>
+              <input
+                ref={previewFileRef}
+                type="file"
+                accept="image/webp,image/png,image/jpeg,image/gif"
+                className="w-full text-sm text-slate-300 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600"
+              />
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handlePreviewImageUpload}
+            disabled={previewUploading}
+            className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
+          >
+            {previewUploading ? 'Uploading…' : 'Upload preview to R2'}
+          </button>
+          {previewUploadStatus.result && <p className="mt-2 text-sm text-green-400 break-all">{previewUploadStatus.result}</p>}
+          {previewUploadStatus.error && <p className="mt-2 text-sm text-red-400">{previewUploadStatus.error}</p>}
+        </div>
+
       </div>
     </div>
   );
