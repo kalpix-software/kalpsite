@@ -310,20 +310,24 @@ function rebuildCatalogWithAssignments(
   return result;
 }
 
-// ─── R2 upload helper ───
+// ─── R2 upload helper (proxied through backend — R2 presigned URLs don't work with custom domains) ───
 
-async function getUploadUrl(itemType: string, category: string, contentType: string, fileName?: string, subcategory?: string) {
-  const raw = await callRpc(
-    'store/admin_get_upload_url',
-    JSON.stringify({ itemType, category, subcategory: subcategory ?? '', contentType, fileName: fileName ?? '' }),
-  );
-  return unwrapAdminRpcData<{ uploadUrl: string; publicUrl: string; key: string }>(raw);
-}
+async function uploadFileToR2(file: File, itemType: string, category: string, fileName?: string, subcategory?: string): Promise<string> {
+  const form = new FormData();
+  form.append('itemType', itemType);
+  form.append('category', category);
+  form.append('subcategory', subcategory ?? '');
+  form.append('fileName', fileName ?? '');
+  form.append('file', file, fileName ?? file.name);
 
-async function uploadFileToR2(file: File, itemType: string, category: string, fileName?: string, subcategory?: string) {
-  const { uploadUrl, publicUrl } = await getUploadUrl(itemType, category, file.type, fileName, subcategory);
-  await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
-  return publicUrl;
+  const res = await fetch('/api/admin/upload', { method: 'POST', body: form });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Upload failed' }));
+    throw new Error(err.error ?? 'Upload failed');
+  }
+  const data = await res.json();
+  if (!data.publicUrl) throw new Error('No publicUrl in upload response');
+  return data.publicUrl;
 }
 
 // ─── Page Component ───
@@ -418,21 +422,7 @@ export default function AdminAvatarsPage() {
       // Use deterministic filename: {optionId}.webp — matches the catalog previewUrl path
       const ext = file.type === 'image/png' ? '.png' : file.type === 'image/jpeg' ? '.jpg' : file.type === 'image/gif' ? '.gif' : '.webp';
       const deterministicFileName = `${optionId}${ext}`;
-      const raw = await callRpc(
-        'store/admin_get_upload_url',
-        JSON.stringify({
-          itemType: 'avatar_preview',
-          category: s,
-          subcategory: sub,
-          contentType: file.type,
-          fileName: deterministicFileName,
-        }),
-      );
-      const { uploadUrl, publicUrl } = unwrapAdminRpcData<{ uploadUrl: string; publicUrl: string }>(raw);
-      if (!uploadUrl || !publicUrl) {
-        throw new Error('Invalid upload URL response');
-      }
-      await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+      const publicUrl = await uploadFileToR2(file, 'avatar_preview', s, deterministicFileName, sub);
       await callRpc(
         'avatar/admin_set_option_preview',
         JSON.stringify({
