@@ -582,7 +582,7 @@ export default function AdminAvatarsPage() {
     setCustomCategories((prev) => prev.filter((c) => c.key !== key));
   };
 
-  const confirmAssignments = () => {
+  const confirmAssignments = async () => {
     if (!pendingCatalogBundle) return;
     const avatars = pendingCatalogBundle.avatars.map((avatar) => {
       const originalCategories = avatar.catalog?.categories ?? avatar.categories ?? [];
@@ -598,6 +598,22 @@ export default function AdminAvatarsPage() {
     setParsed(bundle);
     setPriceRows(flattenToPriceRows(bundle.avatars));
     setPendingCatalogBundle(null);
+
+    // Immediately save catalog to DB (prices default to 0 — admin can update below)
+    setSaveStatus({ loading: true });
+    try {
+      const payload = applyPricesToCatalog(bundle.avatars, flattenToPriceRows(bundle.avatars));
+      await callRpc('avatar/sync_avatars', JSON.stringify(payload));
+      setSaveStatus({ loading: false, result: 'Catalog saved to database. Set prices below and save again, or upload preview images.' });
+      // Populate preview slug for the upload section
+      if (bundle.avatars[0]) {
+        setPreviewCatalog(bundle.avatars[0].catalog?.categories ?? []);
+        setPreviewSlug(bundle.avatars[0].slug);
+      }
+      loadAvatarList();
+    } catch (e) {
+      setSaveStatus({ loading: false, error: `Catalog saved locally but DB write failed: ${e instanceof Error ? e.message : 'unknown error'}. Use "Save to database" below to retry.` });
+    }
   };
 
   const setPriceRow = (rowKey: string, field: 'currencyType' | 'price' | 'purchaseLimit', value: string | number) => {
@@ -606,19 +622,17 @@ export default function AdminAvatarsPage() {
 
   const saveToDatabase = async () => {
     if (!parsed || priceRows.length === 0) {
-      setSaveStatus({ loading: false, error: 'Parse a catalog first, then save.' });
+      setSaveStatus({ loading: false, error: 'Upload Spine assets and confirm assignments first.' });
       return;
     }
     setSaveStatus({ loading: true });
     try {
       const payload = applyPricesToCatalog(parsed.avatars, priceRows);
       await callRpc('avatar/sync_avatars', JSON.stringify(payload));
-      setSaveStatus({ loading: false, result: 'Saved to database. Avatar list, catalog, and store items are updated.' });
-      // Populate preview upload section with the saved catalog
+      setSaveStatus({ loading: false, result: 'Prices saved. Catalog and store items updated.' });
       const firstAvatar = payload.avatars[0];
       if (firstAvatar) {
-        const cats = firstAvatar.catalog?.categories ?? [];
-        setPreviewCatalog(cats);
+        setPreviewCatalog(firstAvatar.catalog?.categories ?? []);
         setPreviewSlug(firstAvatar.slug);
         setPreviewSubcategory('');
         setPreviewOptionId('');
@@ -651,15 +665,17 @@ export default function AdminAvatarsPage() {
 
       {/* Step guide */}
       <div className="max-w-5xl mb-4 p-3 rounded-xl bg-slate-800 border border-slate-700 text-xs text-slate-400">
-        <span className="font-semibold text-slate-300">Required order: </span>
+        <span className="font-semibold text-slate-300">Flow: </span>
         <span className="text-indigo-400 font-medium">① Upload Spine Assets</span>
         {' → '}
         <span className="text-indigo-400 font-medium">② Confirm Category Assignments</span>
+        <span className="text-slate-500"> (auto-saves catalog to DB)</span>
         {' → '}
-        <span className="text-indigo-400 font-medium">③ Set Prices &amp; Save to Database</span>
+        <span className="text-indigo-400 font-medium">③ Adjust Prices &amp; Save</span>
+        <span className="text-slate-500"> (optional, can repeat)</span>
         {' → '}
-        <span className="text-indigo-400 font-medium">④ Upload Option Preview Images</span>
-        <span className="ml-2 text-slate-500">(preview images require the catalog to be saved first)</span>
+        <span className="text-indigo-400 font-medium">④ Upload Preview Images</span>
+        <span className="text-slate-500"> (uploads to fixed R2 path, updates catalog)</span>
       </div>
 
       <div className="max-w-5xl space-y-4">
@@ -854,7 +870,7 @@ export default function AdminAvatarsPage() {
               onClick={confirmAssignments}
               className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500"
             >
-              Confirm Assignments & Set Prices
+              Confirm & Save Catalog to Database
             </button>
           </div>
         )}
@@ -890,7 +906,7 @@ export default function AdminAvatarsPage() {
         {/* ─── Price table ─── */}
         {priceRows.length > 0 && (
           <div className="p-4 rounded-xl bg-slate-800 border border-slate-700">
-            <h2 className="font-medium text-slate-100 mb-3">Prices (fill in and save)</h2>
+            <h2 className="font-medium text-slate-100 mb-3">Prices <span className="text-slate-400 text-xs font-normal">(catalog already saved — update prices and save again to override)</span></h2>
             <div className="overflow-x-auto rounded-lg border border-slate-600 max-h-96 overflow-y-auto">
               <table className="w-full text-sm">
                 <thead className="bg-slate-700 text-slate-200 sticky top-0">
@@ -945,7 +961,7 @@ export default function AdminAvatarsPage() {
             Upload option preview image
           </h2>
           <p className="text-slate-400 text-xs mb-3">
-            Upload a preview image for each option. The catalog must be saved first (step 3 above). The file will be uploaded to R2 as <code className="bg-slate-700 px-1 rounded">avatars/&#123;slug&#125;/previews/&#123;subcategory&#125;/&#123;optionId&#125;.webp</code> and the catalog URL will be updated.
+            Upload a preview image for each option. Each file is saved at the fixed R2 path <code className="bg-slate-700 px-1 rounded">avatars/&#123;slug&#125;/previews/&#123;subcategory&#125;/&#123;optionId&#125;.webp</code> — re-uploading overwrites the existing image at the same URL. The catalog <code className="bg-slate-700 px-1 rounded">previewUrl</code> is updated in the database automatically.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
             {/* Avatar slug: pick from list or use current */}
