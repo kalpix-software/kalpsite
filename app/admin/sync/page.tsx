@@ -17,14 +17,14 @@ type AvatarListItem = {
   sortOrder?: number;
 };
 
-type CatalogOption = { optionId: string; label: string; previewUrl?: string; skinName?: string; currencyType?: string; price?: number; purchaseLimit?: number };
+type CatalogOption = { optionId: string; label: string; previewUrl?: string; skinName?: string; currencyType?: string; price?: number; discountedPrice?: number; purchaseLimit?: number };
 type CatalogSubcategory = { key: string; label: string; options: CatalogOption[] };
 type CatalogCategory = { key: string; label: string; subcategories: CatalogSubcategory[] };
 type CatalogPart = { defaultSelection?: Record<string, string>; categories: CatalogCategory[] };
 type AvatarCatalogEntry = { slug: string; avatarName: string; catalog?: CatalogPart; categories?: CatalogCategory[] };
 type RawCatalogBundle = { avatars: AvatarCatalogEntry[] };
 
-type PriceRow = { slug: string; categoryKey: string; subcategoryKey: string; optionId: string; label: string; currencyType: string; price: number; purchaseLimit: number; rowKey: string };
+type PriceRow = { slug: string; categoryKey: string; subcategoryKey: string; optionId: string; label: string; currencyType: string; price: number; salePrice: number; purchaseLimit: number; rowKey: string };
 
 // ─── Category assignment types ───
 type SubcategoryAssignment = { subcategoryKey: string; categoryKey: string; categoryLabel: string };
@@ -214,6 +214,7 @@ function flattenToPriceRows(avatars: RawCatalogBundle['avatars']): PriceRow[] {
             label: opt.label,
             currencyType: opt.currencyType ?? 'coins',
             price: opt.price ?? 0,
+            salePrice: opt.discountedPrice ?? 0,
             purchaseLimit: opt.purchaseLimit ?? legacyMax ?? 1,
             rowKey: `${av.slug}|${cat.key}|${sub.key}|${opt.optionId}`,
           });
@@ -241,10 +242,12 @@ function applyPricesToCatalog(avatars: RawCatalogBundle['avatars'], priceRows: P
               const rowKey = `${av.slug}|${cat.key}|${sub.key}|${opt.optionId}`;
               const row = byKey.get(rowKey);
               const legacyMax = (opt as { maxQuantityPerUser?: number }).maxQuantityPerUser;
+              const salePrice = row ? row.salePrice : (opt.discountedPrice ?? 0);
               return {
                 ...opt,
                 currencyType: row ? row.currencyType : (opt.currencyType ?? 'coins'),
                 price: row ? row.price : (opt.price ?? 0),
+                discountedPrice: salePrice > 0 ? salePrice : undefined,
                 purchaseLimit: row?.purchaseLimit ?? opt.purchaseLimit ?? legacyMax ?? 1,
               };
             }),
@@ -310,23 +313,54 @@ function rebuildCatalogWithAssignments(
   return result;
 }
 
-// ─── R2 upload helper (proxied through backend — R2 presigned URLs don't work with custom domains) ───
+// ─── R2 upload helper (browser-direct via presigned URL from backend) ───
 
+/** Content-type mapping for file extensions */
+function contentTypeForFile(file: File): string {
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.json')) return 'application/json';
+  if (name.endsWith('.txt') || name.endsWith('.atlas')) return 'text/plain';
+  if (name.endsWith('.webp')) return 'image/webp';
+  if (name.endsWith('.png')) return 'image/png';
+  if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
+  if (name.endsWith('.gif')) return 'image/gif';
+  return file.type || 'application/octet-stream';
+}
+
+/**
+ * Upload a file directly to R2 from the browser:
+ * 1. Get a presigned PUT URL from backend (store/admin_get_upload_url RPC)
+ * 2. Browser PUTs the file directly to R2 (no server proxy)
+ * Returns the public URL of the uploaded file.
+ */
 async function uploadFileToR2(file: File, itemType: string, category: string, fileName?: string, subcategory?: string): Promise<string> {
-  const form = new FormData();
-  form.append('itemType', itemType);
-  form.append('category', category);
-  form.append('subcategory', subcategory ?? '');
-  form.append('fileName', fileName ?? '');
-  form.append('file', file, fileName ?? file.name);
+  const contentType = contentTypeForFile(file);
 
-  const res = await fetch('/api/admin/upload', { method: 'POST', body: form });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: 'Upload failed' }));
-    throw new Error(err.error ?? 'Upload failed');
+  // Step 1: Get presigned URL from backend
+  const rpcPayload = JSON.stringify({
+    itemType,
+    category,
+    subcategory: subcategory ?? '',
+    contentType,
+    fileName: fileName ?? file.name,
+  });
+  const rpcResult = await callAdminRpc('store/admin_get_upload_url', rpcPayload);
+  const data = unwrapAdminRpcData<{ uploadUrl?: string; publicUrl?: string }>(rpcResult);
+  if (!data?.uploadUrl || !data?.publicUrl) {
+    throw new Error('Failed to get upload URL from backend');
   }
-  const data = await res.json();
-  if (!data.publicUrl) throw new Error('No publicUrl in upload response');
+
+  // Step 2: Browser PUTs file directly to R2 using presigned URL
+  const putRes = await fetch(data.uploadUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': contentType },
+    body: file,
+  });
+  if (!putRes.ok) {
+    const errText = await putRes.text().catch(() => '');
+    throw new Error(`R2 upload failed (${putRes.status}): ${errText.slice(0, 200)}`);
+  }
+
   return data.publicUrl;
 }
 
@@ -348,6 +382,11 @@ export default function AdminAvatarsPage() {
   const [previewUploadStatus, setPreviewUploadStatus] = useState<{ result?: string; error?: string }>({});
   const previewFileRef = useRef<HTMLInputElement>(null);
   const [previewCatalog, setPreviewCatalog] = useState<CatalogCategory[]>([]);
+  // Track which preview images already exist on R2: key = "subcategoryKey/optionId", value = true (exists) / false (missing) / undefined (checking)
+  const [previewExists, setPreviewExists] = useState<Record<string, boolean>>({});
+  const [previewCheckLoading, setPreviewCheckLoading] = useState(false);
+  /** When true, upload is skipped if we already detected a preview on R2 for the selected option */
+  const [skipUploadIfPreviewExists, setSkipUploadIfPreviewExists] = useState(false);
 
   // Catalog state (generated from Spine or pasted JSON)
   const [catalogRaw, setCatalogRaw] = useState('');
@@ -411,6 +450,11 @@ export default function AdminAvatarsPage() {
       setPreviewUploadStatus({ error: 'Choose a preview image.' });
       return;
     }
+    const existKey = `${sub}/${optionId}`;
+    if (skipUploadIfPreviewExists && previewExists[existKey] === true) {
+      setPreviewUploadStatus({ result: 'Skipped — preview already on R2 (disable “Skip if preview exists” to overwrite).' });
+      return;
+    }
     const allowed = ['image/webp', 'image/png', 'image/jpeg', 'image/gif'];
     if (!allowed.includes(file.type)) {
       setPreviewUploadStatus({ error: 'Use WebP, PNG, JPEG, or GIF.' });
@@ -435,6 +479,7 @@ export default function AdminAvatarsPage() {
       setPreviewUploadStatus({
         result: `Uploaded ${sub}/${optionId} preview. Catalog updated.`,
       });
+      setPreviewExists((prev) => ({ ...prev, [existKey]: true }));
       if (previewFileRef.current) previewFileRef.current.value = '';
     } catch (e) {
       setPreviewUploadStatus({ error: e instanceof Error ? e.message : 'Upload failed' });
@@ -442,6 +487,62 @@ export default function AdminAvatarsPage() {
       setPreviewUploading(false);
     }
   };
+
+  const R2_PUBLIC_BASE = 'https://assets.kalpixsoftware.com';
+
+  async function headOk(url: string): Promise<boolean> {
+    try {
+      const res = await fetch(url, { method: 'HEAD', mode: 'cors' });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /** True if a preview object exists: catalog previewUrl (if http) or any of .webp/.png/.jpg/.jpeg/.gif at the canonical path */
+  async function previewObjectExists(avatarSlug: string, subcategoryKey: string, opt: CatalogOption): Promise<boolean> {
+    const pu = opt.previewUrl?.trim();
+    if (pu?.startsWith('http') && (await headOk(pu))) return true;
+    const base = `${R2_PUBLIC_BASE}/avatars/${avatarSlug}/previews/${subcategoryKey}/${opt.optionId}`;
+    for (const ext of ['.webp', '.png', '.jpg', '.jpeg', '.gif']) {
+      if (await headOk(base + ext)) return true;
+    }
+    return false;
+  }
+
+  // Check which preview images exist on R2 for the given subcategory
+  const checkPreviewsExist = useCallback(async (avatarSlug: string, subcategoryKey: string, catalog: CatalogCategory[]) => {
+    const options: CatalogOption[] = [];
+    for (const cat of catalog) {
+      for (const sub of cat.subcategories) {
+        if (sub.key === subcategoryKey) {
+          options.push(...sub.options);
+        }
+      }
+    }
+    setPreviewCheckLoading(true);
+    // Mark all as "checking" (undefined) until done — clear previous keys for this subcategory
+    setPreviewExists((prev) => {
+      const next = { ...prev };
+      for (const opt of options) delete next[`${subcategoryKey}/${opt.optionId}`];
+      return next;
+    });
+    try {
+      const checks = options.map(async (opt) => {
+        const key = `${subcategoryKey}/${opt.optionId}`;
+        const exists = await previewObjectExists(avatarSlug, subcategoryKey, opt);
+        return { key, exists };
+      });
+      const results = await Promise.all(checks);
+      setPreviewExists((prev) => {
+        const next = { ...prev };
+        for (const r of results) next[r.key] = r.exists;
+        return next;
+      });
+    } finally {
+      setPreviewCheckLoading(false);
+    }
+  }, []);
 
   // Load catalog for an avatar from backend (for preview upload when catalog was saved in a previous session)
   const loadCatalogForPreview = async (avatarSlug: string) => {
@@ -453,6 +554,7 @@ export default function AdminAvatarsPage() {
       setPreviewSlug(avatarSlug);
       setPreviewSubcategory('');
       setPreviewOptionId('');
+      setPreviewExists({});
     } catch {
       setPreviewUploadStatus({ error: `Failed to load catalog for ${avatarSlug}` });
     }
@@ -616,7 +718,7 @@ export default function AdminAvatarsPage() {
     }
   };
 
-  const setPriceRow = (rowKey: string, field: 'currencyType' | 'price' | 'purchaseLimit', value: string | number) => {
+  const setPriceRow = (rowKey: string, field: 'currencyType' | 'price' | 'salePrice' | 'purchaseLimit', value: string | number) => {
     setPriceRows((prev) => prev.map((r) => (r.rowKey === rowKey ? { ...r, [field]: value } : r)));
   };
 
@@ -918,6 +1020,7 @@ export default function AdminAvatarsPage() {
                     <th className="text-left px-2 py-1.5">Label</th>
                     <th className="text-left w-24">Currency</th>
                     <th className="text-left w-24">Price</th>
+                    <th className="text-left w-24" title="Discounted price (0 = no sale)">Sale Price</th>
                     <th className="text-left w-24" title="Max quantity the user can own (1 = buy once)">Limit</th>
                   </tr>
                 </thead>
@@ -937,6 +1040,9 @@ export default function AdminAvatarsPage() {
                       </td>
                       <td className="px-2 py-1">
                         <input type="number" min={0} value={r.price === 0 ? '' : r.price} onChange={(e) => setPriceRow(r.rowKey, 'price', e.target.value === '' ? 0 : parseInt(e.target.value, 10) || 0)} placeholder="0" className="w-20 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-600 text-slate-100 placeholder:text-slate-500" />
+                      </td>
+                      <td className="px-2 py-1">
+                        <input type="number" min={0} value={r.salePrice === 0 ? '' : r.salePrice} onChange={(e) => setPriceRow(r.rowKey, 'salePrice', e.target.value === '' ? 0 : parseInt(e.target.value, 10) || 0)} placeholder="0" title="0 = no sale" className="w-20 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-600 text-slate-100 placeholder:text-slate-500" />
                       </td>
                       <td className="px-2 py-1">
                         <input type="number" min={1} value={r.purchaseLimit === 1 ? '' : r.purchaseLimit} onChange={(e) => setPriceRow(r.rowKey, 'purchaseLimit', e.target.value === '' ? 1 : Math.max(1, parseInt(e.target.value, 10) || 1))} placeholder="1" title="1 = buy once" className="w-16 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-600 text-slate-100 placeholder:text-slate-500" />
@@ -969,7 +1075,12 @@ export default function AdminAvatarsPage() {
               <label className="block text-xs text-slate-400 mb-1">Avatar</label>
               <select
                 value={previewSlug}
-                onChange={(e) => { setPreviewSlug(e.target.value); if (e.target.value) loadCatalogForPreview(e.target.value); }}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setPreviewSlug(v);
+                  setPreviewExists({});
+                  if (v) loadCatalogForPreview(v);
+                }}
                 className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm"
               >
                 <option value="">Select avatar...</option>
@@ -983,7 +1094,12 @@ export default function AdminAvatarsPage() {
               <label className="block text-xs text-slate-400 mb-1">Subcategory</label>
               <select
                 value={previewSubcategory}
-                onChange={(e) => { setPreviewSubcategory(e.target.value); setPreviewOptionId(''); }}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setPreviewSubcategory(v);
+                  setPreviewOptionId('');
+                  if (v && previewSlug) void checkPreviewsExist(previewSlug, v, previewCatalog);
+                }}
                 disabled={previewCatalog.length === 0}
                 className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm disabled:opacity-50"
               >
@@ -1025,6 +1141,68 @@ export default function AdminAvatarsPage() {
               />
             </div>
           </div>
+
+          {previewSubcategory && previewSlug && (
+            <div className="mb-3 p-3 rounded-lg bg-slate-900/80 border border-slate-600">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <span className="text-xs font-medium text-slate-300">Preview status ({previewSubcategory})</span>
+                <div className="flex items-center gap-2">
+                  {previewCheckLoading && <span className="text-xs text-slate-500">Checking…</span>}
+                  <button
+                    type="button"
+                    disabled={previewCheckLoading || !previewSlug}
+                    onClick={() => void checkPreviewsExist(previewSlug, previewSubcategory, previewCatalog)}
+                    className="text-xs px-2 py-1 rounded bg-slate-700 text-slate-200 hover:bg-slate-600 disabled:opacity-50"
+                  >
+                    Re-check
+                  </button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1.5 text-xs">
+                {previewCatalog.flatMap((cat) =>
+                  cat.subcategories
+                    .filter((sub) => sub.key === previewSubcategory)
+                    .flatMap((sub) =>
+                      sub.options.map((opt) => {
+                        const k = `${previewSubcategory}/${opt.optionId}`;
+                        const st = previewExists[k];
+                        const label =
+                          st === true ? 'On R2' : st === false ? 'Missing' : '…';
+                        const cls =
+                          st === true
+                            ? 'bg-emerald-900/50 text-emerald-200 border-emerald-700'
+                            : st === false
+                              ? 'bg-amber-900/40 text-amber-200 border-amber-700'
+                              : 'bg-slate-700 text-slate-400 border-slate-600';
+                        return (
+                          <button
+                            key={opt.optionId}
+                            type="button"
+                            onClick={() => setPreviewOptionId(opt.optionId)}
+                            title="Select this option for upload"
+                            className={`px-2 py-1 rounded border ${cls} hover:opacity-90`}
+                          >
+                            <span className="font-mono">{opt.optionId}</span>
+                            <span className="text-slate-400 mx-1">·</span>
+                            {label}
+                          </button>
+                        );
+                      }),
+                    ),
+                )}
+              </div>
+              <label className="mt-3 flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={skipUploadIfPreviewExists}
+                  onChange={(e) => setSkipUploadIfPreviewExists(e.target.checked)}
+                  className="rounded border-slate-600"
+                />
+                Skip upload if preview already on R2 (uncheck to overwrite)
+              </label>
+            </div>
+          )}
+
           <button
             type="button"
             onClick={handlePreviewImageUpload}
