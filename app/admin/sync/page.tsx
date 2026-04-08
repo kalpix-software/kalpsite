@@ -24,7 +24,7 @@ type CatalogPart = { defaultSelection?: Record<string, string>; categories: Cata
 type AvatarCatalogEntry = { slug: string; avatarName: string; catalog?: CatalogPart; categories?: CatalogCategory[] };
 type RawCatalogBundle = { avatars: AvatarCatalogEntry[] };
 
-type PriceRow = { slug: string; categoryKey: string; subcategoryKey: string; optionId: string; label: string; currencyType: string; price: number; salePrice: number; purchaseLimit: number; rowKey: string };
+type PriceRow = { slug: string; categoryKey: string; subcategoryKey: string; optionId: string; label: string; currencyType: string; price: number; salePrice: number; purchaseLimit: number; rowKey: string; itemId?: string };
 
 // ─── Category assignment types ───
 type SubcategoryAssignment = { subcategoryKey: string; categoryKey: string; categoryLabel: string };
@@ -687,7 +687,7 @@ export default function AdminAvatarsPage() {
   /** Fetch current store item prices from DB for an avatar and merge into price rows. */
   const mergeDbPricesIntoRows = async (rows: PriceRow[], avatarSlugs: string[]): Promise<PriceRow[]> => {
     // Build a map from store item slug → DB price data
-    const dbPriceMap = new Map<string, { coins: number; gems: number; discountedCoins: number; discountedGems: number; purchaseLimit: number }>();
+    const dbPriceMap = new Map<string, { itemId: string; coins: number; gems: number; discountedCoins: number; discountedGems: number; purchaseLimit: number }>();
 
     for (const avatarSlug of avatarSlugs) {
       try {
@@ -697,14 +697,14 @@ export default function AdminAvatarsPage() {
           category: avatarSlug,
           includeInactive: true,
           limit: 2000,
-        })) as { data?: { items?: Array<{ slug?: string; price?: { coins: number; gems: number }; discountedPriceCoins?: number; discountedPriceGems?: number; metadata?: Record<string, string> }> }; items?: Array<{ slug?: string; price?: { coins: number; gems: number }; discountedPriceCoins?: number; discountedPriceGems?: number; metadata?: Record<string, string> }> };
+        })) as { data?: { items?: Array<{ itemId?: string; slug?: string; price?: { coins: number; gems: number }; discountedPriceCoins?: number; discountedPriceGems?: number; metadata?: Record<string, string> }> }; items?: Array<{ itemId?: string; slug?: string; price?: { coins: number; gems: number }; discountedPriceCoins?: number; discountedPriceGems?: number; metadata?: Record<string, string> }> };
         const raw = data?.data ?? data;
         const items = raw?.items ?? [];
         for (const item of items) {
           if (!item.slug) continue;
-          // Extract the subcategory_optionId part from the slug (format: avatarID_subcategory_optionId)
           const limit = parseInt(item.metadata?.purchaseLimit ?? '1', 10);
           dbPriceMap.set(item.slug, {
+            itemId: item.itemId ?? '',
             coins: item.price?.coins ?? 0,
             gems: item.price?.gems ?? 0,
             discountedCoins: item.discountedPriceCoins ?? 0,
@@ -730,6 +730,7 @@ export default function AdminAvatarsPage() {
       const salePrice = dbPrice.discountedCoins > 0 ? dbPrice.discountedCoins : dbPrice.discountedGems;
       return {
         ...row,
+        itemId: dbPrice.itemId,
         currencyType: dbPrice.gems > 0 ? 'gems' : 'coins',
         price: price,
         salePrice: salePrice,
@@ -755,29 +756,29 @@ export default function AdminAvatarsPage() {
     const initialRows = flattenToPriceRows(bundle.avatars);
     setPendingCatalogBundle(null);
 
-    // Immediately save catalog to DB (preserves existing prices for known items)
+    // Check DB for existing store items and pre-fill prices from DB.
+    // Do NOT sync to DB yet — let admin review and edit prices first.
     setSaveStatus({ loading: true });
     try {
-      const payload = applyPricesToCatalog(bundle.avatars, initialRows);
-      await callRpc('avatar/sync_avatars', JSON.stringify(payload));
-
-      // After sync, fetch actual DB prices and merge them into the price table.
-      // This ensures admin sees prices from previous sessions, not zeros.
       const avatarSlugs = avatars.map((a) => a.slug);
       const mergedRows = await mergeDbPricesIntoRows(initialRows, avatarSlugs);
       setPriceRows(mergedRows);
 
-      setSaveStatus({ loading: false, result: 'Catalog saved. Prices loaded from database — edit below and save.' });
-      // Populate preview slug for the upload section
+      const existingCount = mergedRows.filter((r) => r.itemId).length;
+      const newCount = mergedRows.length - existingCount;
+      const msg = existingCount > 0
+        ? `Found ${existingCount} existing items (prices loaded from database)${newCount > 0 ? ` and ${newCount} new items` : ''}. Edit prices below, then click "Save to database".`
+        : `${newCount} new items. Set prices below, then click "Save to database".`;
+      setSaveStatus({ loading: false, result: msg });
+
       if (bundle.avatars[0]) {
         setPreviewCatalog(bundle.avatars[0].catalog?.categories ?? []);
         setPreviewSlug(bundle.avatars[0].slug);
       }
-      loadAvatarList();
     } catch (e) {
-      // Still show the rows even if DB fetch fails — admin can set prices manually
+      // DB fetch failed — show rows with default prices, admin can still edit
       setPriceRows(initialRows);
-      setSaveStatus({ loading: false, error: `Catalog saved locally but DB write failed: ${e instanceof Error ? e.message : 'unknown error'}. Use "Save to database" below to retry.` });
+      setSaveStatus({ loading: false, result: 'Could not load existing prices from database. Set prices below and save.' });
     }
   };
 
@@ -792,9 +793,48 @@ export default function AdminAvatarsPage() {
     }
     setSaveStatus({ loading: true });
     try {
+      // Step 1: Sync catalog structure to DB (creates new items, updates names/skins).
+      // Pass current prices so NEW items are created with the admin-set price.
       const payload = applyPricesToCatalog(parsed.avatars, priceRows);
       await callRpc('avatar/sync_avatars', JSON.stringify(payload));
-      setSaveStatus({ loading: false, result: 'Prices saved. Catalog and store items updated.' });
+
+      // Step 2: Fetch itemIds for all rows (including newly created items from step 1).
+      const avatarSlugs = parsed.avatars.map((a) => a.slug);
+      const rowsWithIds = await mergeDbPricesIntoRows(priceRows, avatarSlugs);
+
+      // Step 3: Update prices for ALL items via admin API.
+      // This is the authoritative write — overrides whatever the sync set.
+      let updated = 0;
+      let failed = 0;
+      for (const row of rowsWithIds) {
+        if (!row.itemId) continue;
+        const coins = row.currencyType === 'coins' ? row.price : 0;
+        const gems = row.currencyType === 'gems' ? row.price : 0;
+        const discountedCoins = row.currencyType === 'coins' ? row.salePrice : 0;
+        const discountedGems = row.currencyType === 'gems' ? row.salePrice : 0;
+        try {
+          await callRpc('store/admin_update_item', JSON.stringify({
+            itemId: row.itemId,
+            price: { coins, gems },
+            discountedPriceCoins: discountedCoins,
+            discountedPriceGems: discountedGems,
+            metadata: { purchaseLimit: String(row.purchaseLimit) },
+          }));
+          updated++;
+        } catch (e) {
+          console.warn(`Failed to update price for ${row.itemId}:`, e);
+          failed++;
+        }
+      }
+
+      // Update local state with itemIds
+      setPriceRows(rowsWithIds);
+
+      const msg = failed > 0
+        ? `Saved ${updated} items, ${failed} failed. Check console for details.`
+        : `All ${updated} items saved successfully.`;
+      setSaveStatus({ loading: false, result: msg });
+
       const firstAvatar = payload.avatars[0];
       if (firstAvatar) {
         setPreviewCatalog(firstAvatar.catalog?.categories ?? []);
