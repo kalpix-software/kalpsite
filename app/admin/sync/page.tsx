@@ -686,24 +686,36 @@ export default function AdminAvatarsPage() {
 
   /** Fetch current store item prices from DB for an avatar and merge into price rows. */
   const mergeDbPricesIntoRows = async (rows: PriceRow[], avatarSlugs: string[]): Promise<PriceRow[]> => {
-    // Build a map from store item slug → DB price data
-    const dbPriceMap = new Map<string, { itemId: string; coins: number; gems: number; discountedCoins: number; discountedGems: number; purchaseLimit: number }>();
+    type DbItem = {
+      itemId?: string; slug?: string;
+      subcategoryKey?: string; optionId?: string;
+      price?: { coins: number; gems: number };
+      discountedPriceCoins?: number; discountedPriceGems?: number;
+      metadata?: Record<string, string>;
+    };
+
+    // Map by "subcategoryKey|optionId" — this is stable regardless of how the
+    // backend builds the store item slug (which uses avatarID UUID, not slug).
+    const dbMap = new Map<string, { itemId: string; coins: number; gems: number; discountedCoins: number; discountedGems: number; purchaseLimit: number }>();
 
     for (const avatarSlug of avatarSlugs) {
       try {
-        // Fetch all items for this avatar from the store
         const data = await callRpc('store/get_items', JSON.stringify({
           upgradeType: 'avatar_upgrade',
           category: avatarSlug,
           includeInactive: true,
           limit: 2000,
-        })) as { data?: { items?: Array<{ itemId?: string; slug?: string; price?: { coins: number; gems: number }; discountedPriceCoins?: number; discountedPriceGems?: number; metadata?: Record<string, string> }> }; items?: Array<{ itemId?: string; slug?: string; price?: { coins: number; gems: number }; discountedPriceCoins?: number; discountedPriceGems?: number; metadata?: Record<string, string> }> };
+        })) as { data?: { items?: DbItem[] }; items?: DbItem[] };
         const raw = data?.data ?? data;
         const items = raw?.items ?? [];
         for (const item of items) {
-          if (!item.slug) continue;
+          // Match key: subcategoryKey + optionId (same fields the price table uses)
+          const subKey = item.subcategoryKey ?? '';
+          const optId = item.optionId ?? '';
+          if (!subKey || !optId) continue;
+          const matchKey = `${subKey}|${optId}`;
           const limit = parseInt(item.metadata?.purchaseLimit ?? '1', 10);
-          dbPriceMap.set(item.slug, {
+          dbMap.set(matchKey, {
             itemId: item.itemId ?? '',
             coins: item.price?.coins ?? 0,
             gems: item.price?.gems ?? 0,
@@ -717,24 +729,23 @@ export default function AdminAvatarsPage() {
       }
     }
 
-    if (dbPriceMap.size === 0) return rows;
+    if (dbMap.size === 0) return rows;
 
     // Merge DB prices into rows — DB values take precedence over catalog defaults
     return rows.map((row) => {
-      // The store item slug follows the pattern: {avatarSlug}_{subcategoryKey}_{optionId}
-      const storeSlug = `${row.slug}_${row.subcategoryKey}_${row.optionId}`;
-      const dbPrice = dbPriceMap.get(storeSlug);
-      if (!dbPrice) return row;
+      const matchKey = `${row.subcategoryKey}|${row.optionId}`;
+      const db = dbMap.get(matchKey);
+      if (!db) return row;
 
-      const price = dbPrice.coins > 0 ? dbPrice.coins : dbPrice.gems;
-      const salePrice = dbPrice.discountedCoins > 0 ? dbPrice.discountedCoins : dbPrice.discountedGems;
+      const price = db.coins > 0 ? db.coins : db.gems;
+      const salePrice = db.discountedCoins > 0 ? db.discountedCoins : db.discountedGems;
       return {
         ...row,
-        itemId: dbPrice.itemId,
-        currencyType: dbPrice.gems > 0 ? 'gems' : 'coins',
-        price: price,
-        salePrice: salePrice,
-        purchaseLimit: dbPrice.purchaseLimit,
+        itemId: db.itemId,
+        currencyType: db.gems > 0 ? 'gems' : 'coins',
+        price,
+        salePrice,
+        purchaseLimit: db.purchaseLimit,
       };
     });
   };
