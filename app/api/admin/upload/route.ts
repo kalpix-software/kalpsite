@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { AUTH_COOKIE_NAME } from '@/lib/auth-cookie';
-import { gameRpc } from '@/lib/nakama';
+import { gameRpc } from '@/lib/kalpix-api';
 
 // Raise Vercel function limits for large Spine asset uploads.
 export const maxDuration = 60;

@@ -5,7 +5,7 @@ const NO_STORE = { 'Cache-Control': 'no-store' };
 
 /**
  * Returns the game session token for the current admin so the client can
- * connect to the Nakama socket (for real-time chat: stream + notifications).
+ * connect to the Kalpix WebSocket (for real-time chat: stream + notifications).
  * Only returns the token if the auth cookie is present.
  */
 export async function GET(req: NextRequest) {

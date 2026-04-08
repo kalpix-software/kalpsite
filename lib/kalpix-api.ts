@@ -1,16 +1,16 @@
 /**
- * Nakama API client for admin operations.
+ * Kalpix API client for admin operations.
  * Kalpsite admin uses the Game API only: login obtains a game session for the admin user,
- * and admin RPCs call the game server with that token. No Nakama Console credentials are used.
+ * and admin RPCs call the game server with that token.
  */
 
-interface NakamaErrorBody {
+interface ApiErrorBody {
   message?: string;
   error?: string | { message?: string };
   code?: number;
 }
 
-interface NakamaRpcResponse {
+interface ApiRpcResponse {
   success?: boolean;
   error?: unknown;
   data?: unknown;
@@ -22,15 +22,15 @@ export interface AuthResult {
   isAdmin?: boolean;
 }
 
-// Backend gateway URL. Set NAKAMA_URL per environment:
-// - Local: .env.local with NAKAMA_URL=http://localhost
-// - Production: NAKAMA_URL=https://api.kalpixsoftware.com (e.g. in Vercel env)
-const NAKAMA_URL = process.env.NAKAMA_URL || 'http://localhost';
+// Backend gateway URL. Set KALPIX_API_URL per environment:
+// - Local: .env.local with KALPIX_API_URL=http://localhost
+// - Production: KALPIX_API_URL=https://api.kalpixsoftware.com (e.g. in Vercel env)
+const API_URL = process.env.KALPIX_API_URL || 'http://localhost';
 
 /** Normalize API error to a string (backend may return error as { code, message }). */
 function errorMessage(data: unknown, fallback: string): string {
   if (data == null) return fallback;
-  const obj = data as NakamaErrorBody;
+  const obj = data as ApiErrorBody;
   if (typeof obj.message === 'string') return obj.message;
   if (typeof obj.error === 'string') return obj.error;
   if (obj.error && typeof obj.error === 'object' && typeof obj.error.message === 'string') {
@@ -40,13 +40,12 @@ function errorMessage(data: unknown, fallback: string): string {
 }
 
 /**
- * Call a game RPC with a game session token (Bearer). Uses the same /api/v1/ path as
- * Plazy (Nginx proxies to Nakama). Do not use /v2/rpc directly – it is not exposed.
+ * Call a game RPC with a game session token (Bearer). Uses the /api/v1/ path.
  */
 export async function gameRpc(token: string, rpcId: string, payload: string): Promise<unknown> {
-  const base = (NAKAMA_URL || '').replace(/\/$/, '');
+  const base = (API_URL || '').replace(/\/$/, '');
   if (!base) {
-    throw new Error('NAKAMA_URL is not set');
+    throw new Error('KALPIX_API_URL is not set');
   }
   const url = `${base}/api/v1/${rpcId}`;
   const body = payload?.trim() || '{}';
@@ -58,10 +57,10 @@ export async function gameRpc(token: string, rpcId: string, payload: string): Pr
     },
     body,
   });
-  let data: NakamaRpcResponse = await res.json().catch(() => ({}));
+  let data: ApiRpcResponse = await res.json().catch(() => ({}));
   if (typeof data.payload === 'string') {
     try {
-      data = JSON.parse(data.payload) as NakamaRpcResponse;
+      data = JSON.parse(data.payload) as ApiRpcResponse;
     } catch {
       // keep as-is
     }
@@ -76,8 +75,8 @@ export async function gameRpc(token: string, rpcId: string, payload: string): Pr
 }
 
 /**
- * Login using the game backend's auth/login_email RPC (same flow as Plazy/Postman).
- * Calls the public /api/v1/auth/login_email endpoint exposed by Nginx and returns
+ * Login using the game backend's auth/login_email RPC.
+ * Calls the public /api/v1/auth/login_email endpoint and returns
  * the same session token the game uses.
  */
 export async function loginWithGameAuth(email: string, password: string): Promise<AuthResult> {
@@ -97,13 +96,13 @@ export async function loginWithGameAuth(email: string, password: string): Promis
 }
 
 /**
- * Call an unauthenticated auth RPC via Nginx (/api/v1/*). Used for register_email,
+ * Call an unauthenticated auth RPC via /api/v1/*. Used for register_email,
  * verify_registration_otp, etc.
  */
 export async function serverRpc(rpcId: string, payload: Record<string, unknown>): Promise<unknown> {
-  const base = (NAKAMA_URL || '').replace(/\/$/, '');
+  const base = (API_URL || '').replace(/\/$/, '');
   if (!base) {
-    throw new Error('NAKAMA_URL is not set; cannot call unauthenticated auth RPCs');
+    throw new Error('KALPIX_API_URL is not set; cannot call unauthenticated auth RPCs');
   }
   const url = `${base}/api/v1/${rpcId}`;
   const res = await fetch(url, {
@@ -111,10 +110,10 @@ export async function serverRpc(rpcId: string, payload: Record<string, unknown>)
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  let data: NakamaRpcResponse = await res.json().catch(() => ({}));
+  let data: ApiRpcResponse = await res.json().catch(() => ({}));
   if (typeof data.payload === 'string') {
     try {
-      data = JSON.parse(data.payload) as NakamaRpcResponse;
+      data = JSON.parse(data.payload) as ApiRpcResponse;
     } catch {
       // keep data as-is
     }

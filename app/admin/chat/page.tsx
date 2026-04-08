@@ -7,7 +7,6 @@ import {
   Image as ImageIcon, Film, FileText, Music, Smile, Paperclip,
   Trash2, X,
 } from 'lucide-react';
-import { Client, Session } from '@heroiclabs/nakama-js';
 import { callAdminRpc } from '@/lib/admin-rpc';
 
 // ---------------------------------------------------------------------------
@@ -393,11 +392,10 @@ export default function AdminChatPage() {
   }, [selectedConvo, fetchMessages]);
 
   // ------ Real-time: join channel stream so we receive reaction_update / new_message (and receiver gets our reactions via backend)
-  const wsUrl = typeof window !== 'undefined' ? process.env.NEXT_PUBLIC_NAKAMA_WS_URL : undefined;
+  const wsUrl = typeof window !== 'undefined' ? process.env.NEXT_PUBLIC_KALPIX_WS_URL : undefined;
   useEffect(() => {
     if (!selectedConvo?.conversationId || !wsUrl) return;
-    let socket: ReturnType<Client['createSocket']> | null = null;
-    let client: Client | null = null;
+    let ws: WebSocket | null = null;
     const channelId = selectedConvo.conversationId;
 
     const applyReactionUpdate = (json: { messageId?: string; emoji?: string; userId?: string; action?: string }) => {
@@ -457,34 +455,45 @@ export default function AdminChatPage() {
         if (!res.ok) return;
         const { token } = (await res.json()) as { token?: string };
         if (!token) return;
+
         const url = new URL(wsUrl);
-        const useSsl = url.protocol === 'wss:';
-        const port = url.port ? parseInt(url.port, 10) : (useSsl ? 443 : 80);
-        client = new Client('defaultkey', url.hostname, port.toString(), useSsl);
-        const session = Session.restore(token, '');
-        socket = client.createSocket(useSsl);
-        socket.onstreamdata = (streamData) => handlePayload(streamData.data);
-        socket.onnotification = (notification) => {
-          if (notification.content) handlePayload(notification.content as object);
+        url.searchParams.set('token', token);
+        // Ensure ws/wss path
+        if (!url.pathname || url.pathname === '/') url.pathname = '/ws';
+
+        ws = new WebSocket(url.toString());
+
+        ws.onmessage = (event) => {
+          try {
+            const envelope = JSON.parse(event.data);
+            if (envelope.type === 'stream_data' && envelope.stream_data?.data) {
+              handlePayload(envelope.stream_data.data);
+            } else if (envelope.type === 'notification' && envelope.notification?.content) {
+              handlePayload(envelope.notification.content);
+            }
+          } catch {
+            // ignore parse errors
+          }
         };
-        await socket.connect(session, false);
-        await callAdminRpc('chat/join_stream', JSON.stringify({ channelId }));
+
+        ws.onopen = () => {
+          callAdminRpc('chat/join_stream', JSON.stringify({ channelId })).catch(() => {});
+        };
+
+        ws.onerror = (err) => {
+          console.warn('Bot chat real-time: socket error', err);
+        };
       } catch (err) {
         console.warn('Bot chat real-time: socket/join failed', err);
       }
     })();
 
     return () => {
-      (async () => {
-        try {
-          if (socket) await callAdminRpc('chat/leave_stream', JSON.stringify({ channelId }));
-        } catch {
-          // ignore
-        }
-      })();
-      if (socket) socket.disconnect(false);
-      socket = null;
-      client = null;
+      callAdminRpc('chat/leave_stream', JSON.stringify({ channelId })).catch(() => {});
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
     };
   }, [selectedConvo?.conversationId, wsUrl, fetchMessages]);
 

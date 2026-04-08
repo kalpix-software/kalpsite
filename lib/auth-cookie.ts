@@ -2,7 +2,7 @@
  * Central config for admin session cookie. Used by login (set), logout (clear), and session (read).
  * Same options everywhere so the cookie is set and cleared correctly.
  */
-export const AUTH_COOKIE_NAME = 'nakama_session';
+export const AUTH_COOKIE_NAME = 'kalpix_session';
 
 const MAX_AGE_DAYS = 7;
 

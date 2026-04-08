@@ -21,8 +21,8 @@ All admin pages live under `/admin` and **require login**. If you are not logged
 ### **`/admin/login`**
 
 - **URL:** `http://localhost:3000/admin/login`
-- **What it does:** **Login only** (no registration). Use an admin account created manually in Nakama (Dashboard, API Explorer, or Postman) with **`is_admin: true`** in account metadata.
-- **Fields:** **Email** and **Password** (that account’s credentials). Only users with **`is_admin`** in Nakama can log in.
+- **What it does:** **Login only** (no registration). Use an admin account created manually in kalpix (Dashboard, API Explorer, or Postman) with **`is_admin: true`** in account metadata.
+- **Fields:** **Email** and **Password** (that account’s credentials). Only users with **`is_admin`** in kalpix can log in.
 - **Behaviour:** On success, sets a session cookie and redirects to `/admin`. On failure (invalid credentials or not an admin account), shows an error message.
 - **Link:** “Back to site” goes to `/`.
 
@@ -76,19 +76,19 @@ All admin pages live under `/admin` and **require login**. If you are not logged
 
 ## Which credentials to use
 
-Log in with the **email and password** of a **game user** (same as Plazy or Postman). Admin access is **verified from the Nakama DB**: only users who have **`is_admin`** in their account metadata can log in.
+Log in with the **email and password** of a **game user** (same as Plazy or Postman). Admin access is **verified from the kalpix DB**: only users who have **`is_admin`** in their account metadata can log in.
 
 - **Login:** Kalpsite uses the same auth as Plazy: **auth/login_email**. The backend returns **isAdmin** in the response (from account metadata). Session check uses **social/get_profile_info** (same RPC Plazy uses); profile includes **isAdmin**.
 - **Admin tasks:** Kalpsite calls the game API with that session token; the backend enforces `is_admin` for admin RPCs.
 
-**Setup:** In **kalpix-backend** set **ADMIN_EMAIL** so the backend grants `is_admin` to that user on register/verify, or set **`is_admin: true`** manually in Nakama for a user. See **docs/ADMIN_AUTH_SECURITY.md**.
+**Setup:** In **kalpix-backend** set **ADMIN_EMAIL** so the backend grants `is_admin` to that user on register/verify, or set **`is_admin: true`** manually in kalpix for a user. See **docs/ADMIN_AUTH_SECURITY.md**.
 
 ---
 
 ## Environment (for reference)
 
-- **`NAKAMA_URL`** – Game server URL (e.g. `http://127.0.0.1:80` or your Nginx in front of Nakama). Used for login and all admin RPCs.
-- **`NAKAMA_SERVER_KEY`** – Server key (see `.env.example`). No Kalpsite-specific admin credentials; admin is verified from Nakama DB.
+- **`kalpix_URL`** – Game server URL (e.g. `http://127.0.0.1:80` or your Nginx in front of kalpix). Used for login and all admin RPCs.
+- **`kalpix_SERVER_KEY`** – Server key (see `.env.example`). No Kalpsite-specific admin credentials; admin is verified from kalpix DB.
 
 ---
 
@@ -97,7 +97,7 @@ Log in with the **email and password** of a **game user** (same as Plazy or Post
 | Page            | Path           | Purpose                          |
 |-----------------|----------------|----------------------------------|
 | Home            | `/`            | Public marketing site            |
-| Admin login     | `/admin/login` | Log in with Nakama Dashboard username and password      |
+| Admin login     | `/admin/login` | Log in with kalpix Dashboard username and password      |
 | Admin dashboard | `/admin`       | Links to Store, Stats, Bundles, Sync |
 | Store items     | `/admin/store` | Catalog, add/edit/delete items   |
 | Purchase stats  | `/admin/stats` | Sales and revenue                |

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { gameRpc } from '@/lib/nakama';
+import { gameRpc } from '@/lib/kalpix-api';
 import { AUTH_COOKIE_NAME } from '@/lib/auth-cookie';
 
 const NO_STORE = { 'Cache-Control': 'no-store' };
