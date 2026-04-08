@@ -684,6 +684,60 @@ export default function AdminAvatarsPage() {
     setCustomCategories((prev) => prev.filter((c) => c.key !== key));
   };
 
+  /** Fetch current store item prices from DB for an avatar and merge into price rows. */
+  const mergeDbPricesIntoRows = async (rows: PriceRow[], avatarSlugs: string[]): Promise<PriceRow[]> => {
+    // Build a map from store item slug → DB price data
+    const dbPriceMap = new Map<string, { coins: number; gems: number; discountedCoins: number; discountedGems: number; purchaseLimit: number }>();
+
+    for (const avatarSlug of avatarSlugs) {
+      try {
+        // Fetch all items for this avatar from the store
+        const data = await callRpc('store/get_items', JSON.stringify({
+          upgradeType: 'avatar_upgrade',
+          category: avatarSlug,
+          includeInactive: true,
+          limit: 2000,
+        })) as { data?: { items?: Array<{ slug?: string; price?: { coins: number; gems: number }; discountedPriceCoins?: number; discountedPriceGems?: number; metadata?: Record<string, string> }> }; items?: Array<{ slug?: string; price?: { coins: number; gems: number }; discountedPriceCoins?: number; discountedPriceGems?: number; metadata?: Record<string, string> }> };
+        const raw = data?.data ?? data;
+        const items = raw?.items ?? [];
+        for (const item of items) {
+          if (!item.slug) continue;
+          // Extract the subcategory_optionId part from the slug (format: avatarID_subcategory_optionId)
+          const limit = parseInt(item.metadata?.purchaseLimit ?? '1', 10);
+          dbPriceMap.set(item.slug, {
+            coins: item.price?.coins ?? 0,
+            gems: item.price?.gems ?? 0,
+            discountedCoins: item.discountedPriceCoins ?? 0,
+            discountedGems: item.discountedPriceGems ?? 0,
+            purchaseLimit: limit > 0 ? limit : 1,
+          });
+        }
+      } catch (e) {
+        console.warn(`Failed to fetch store items for avatar ${avatarSlug}:`, e);
+      }
+    }
+
+    if (dbPriceMap.size === 0) return rows;
+
+    // Merge DB prices into rows — DB values take precedence over catalog defaults
+    return rows.map((row) => {
+      // The store item slug follows the pattern: {avatarSlug}_{subcategoryKey}_{optionId}
+      const storeSlug = `${row.slug}_${row.subcategoryKey}_${row.optionId}`;
+      const dbPrice = dbPriceMap.get(storeSlug);
+      if (!dbPrice) return row;
+
+      const price = dbPrice.coins > 0 ? dbPrice.coins : dbPrice.gems;
+      const salePrice = dbPrice.discountedCoins > 0 ? dbPrice.discountedCoins : dbPrice.discountedGems;
+      return {
+        ...row,
+        currencyType: dbPrice.gems > 0 ? 'gems' : 'coins',
+        price: price,
+        salePrice: salePrice,
+        purchaseLimit: dbPrice.purchaseLimit,
+      };
+    });
+  };
+
   const confirmAssignments = async () => {
     if (!pendingCatalogBundle) return;
     const avatars = pendingCatalogBundle.avatars.map((avatar) => {
@@ -698,15 +752,22 @@ export default function AdminAvatarsPage() {
     });
     const bundle: RawCatalogBundle = { avatars };
     setParsed(bundle);
-    setPriceRows(flattenToPriceRows(bundle.avatars));
+    const initialRows = flattenToPriceRows(bundle.avatars);
     setPendingCatalogBundle(null);
 
-    // Immediately save catalog to DB (prices default to 0 — admin can update below)
+    // Immediately save catalog to DB (preserves existing prices for known items)
     setSaveStatus({ loading: true });
     try {
-      const payload = applyPricesToCatalog(bundle.avatars, flattenToPriceRows(bundle.avatars));
+      const payload = applyPricesToCatalog(bundle.avatars, initialRows);
       await callRpc('avatar/sync_avatars', JSON.stringify(payload));
-      setSaveStatus({ loading: false, result: 'Catalog saved to database. Set prices below and save again, or upload preview images.' });
+
+      // After sync, fetch actual DB prices and merge them into the price table.
+      // This ensures admin sees prices from previous sessions, not zeros.
+      const avatarSlugs = avatars.map((a) => a.slug);
+      const mergedRows = await mergeDbPricesIntoRows(initialRows, avatarSlugs);
+      setPriceRows(mergedRows);
+
+      setSaveStatus({ loading: false, result: 'Catalog saved. Prices loaded from database — edit below and save.' });
       // Populate preview slug for the upload section
       if (bundle.avatars[0]) {
         setPreviewCatalog(bundle.avatars[0].catalog?.categories ?? []);
@@ -714,6 +775,8 @@ export default function AdminAvatarsPage() {
       }
       loadAvatarList();
     } catch (e) {
+      // Still show the rows even if DB fetch fails — admin can set prices manually
+      setPriceRows(initialRows);
       setSaveStatus({ loading: false, error: `Catalog saved locally but DB write failed: ${e instanceof Error ? e.message : 'unknown error'}. Use "Save to database" below to retry.` });
     }
   };
