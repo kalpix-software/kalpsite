@@ -684,68 +684,51 @@ export default function AdminAvatarsPage() {
     setCustomCategories((prev) => prev.filter((c) => c.key !== key));
   };
 
-  /** Fetch current store item prices from DB for an avatar and merge into price rows. */
+  /** Fetch the saved avatar catalog from DB and merge itemId + prices into price rows.
+   *  The catalog options have itemId/price/currencyType set by processAvatarCatalog. */
   const mergeDbPricesIntoRows = async (rows: PriceRow[], avatarSlugs: string[]): Promise<PriceRow[]> => {
-    type DbItem = {
-      itemId?: string; slug?: string;
-      subcategoryKey?: string; optionId?: string;
-      price?: { coins: number; gems: number };
-      discountedPriceCoins?: number; discountedPriceGems?: number;
-      metadata?: Record<string, string>;
-    };
-
-    // Map by "subcategoryKey|optionId" — this is stable regardless of how the
-    // backend builds the store item slug (which uses avatarID UUID, not slug).
-    const dbMap = new Map<string, { itemId: string; coins: number; gems: number; discountedCoins: number; discountedGems: number; purchaseLimit: number }>();
+    // Map by "subcategoryKey|optionId" → DB data from the catalog
+    const dbMap = new Map<string, { itemId: string; currencyType: string; price: number; discountedPrice: number; purchaseLimit: number }>();
 
     for (const avatarSlug of avatarSlugs) {
       try {
-        const data = await callRpc('store/get_items', JSON.stringify({
-          upgradeType: 'avatar_upgrade',
-          category: avatarSlug,
-          includeInactive: true,
-          limit: 2000,
-        })) as { data?: { items?: DbItem[] }; items?: DbItem[] };
-        const raw = data?.data ?? data;
-        const items = raw?.items ?? [];
-        console.log(`[mergeDbPrices] avatar=${avatarSlug}: fetched ${items.length} items from DB`, items.length > 0 ? items[0] : '(empty)');
-        for (const item of items) {
-          // Match key: subcategoryKey + optionId (same fields the price table uses)
-          const subKey = item.subcategoryKey ?? '';
-          const optId = item.optionId ?? '';
-          if (!subKey || !optId) continue;
-          const matchKey = `${subKey}|${optId}`;
-          const limit = parseInt(item.metadata?.purchaseLimit ?? '1', 10);
-          dbMap.set(matchKey, {
-            itemId: item.itemId ?? '',
-            coins: item.price?.coins ?? 0,
-            gems: item.price?.gems ?? 0,
-            discountedCoins: item.discountedPriceCoins ?? 0,
-            discountedGems: item.discountedPriceGems ?? 0,
-            purchaseLimit: limit > 0 ? limit : 1,
-          });
+        const raw = await callRpc('avatar/get_character_catalog', JSON.stringify({ slug: avatarSlug }));
+        const data = unwrapAdminRpcData<{ categories?: CatalogCategory[] }>(raw);
+        const categories = data?.categories ?? [];
+        for (const cat of categories) {
+          for (const sub of cat.subcategories ?? []) {
+            for (const opt of sub.options ?? []) {
+              const optAny = opt as CatalogOption & { itemId?: string };
+              if (!optAny.itemId) continue;
+              const matchKey = `${sub.key}|${opt.optionId}`;
+              dbMap.set(matchKey, {
+                itemId: optAny.itemId,
+                currencyType: opt.currencyType ?? 'coins',
+                price: opt.price ?? 0,
+                discountedPrice: opt.discountedPrice ?? 0,
+                purchaseLimit: opt.purchaseLimit ?? 1,
+              });
+            }
+          }
         }
       } catch (e) {
-        console.warn(`Failed to fetch store items for avatar ${avatarSlug}:`, e);
+        console.warn(`Failed to fetch catalog for avatar ${avatarSlug}:`, e);
       }
     }
 
     if (dbMap.size === 0) return rows;
 
-    // Merge DB prices into rows — DB values take precedence over catalog defaults
     return rows.map((row) => {
       const matchKey = `${row.subcategoryKey}|${row.optionId}`;
       const db = dbMap.get(matchKey);
       if (!db) return row;
 
-      const price = db.coins > 0 ? db.coins : db.gems;
-      const salePrice = db.discountedCoins > 0 ? db.discountedCoins : db.discountedGems;
       return {
         ...row,
         itemId: db.itemId,
-        currencyType: db.gems > 0 ? 'gems' : 'coins',
-        price,
-        salePrice,
+        currencyType: db.currencyType,
+        price: db.price,
+        salePrice: db.discountedPrice,
         purchaseLimit: db.purchaseLimit,
       };
     });
@@ -768,10 +751,15 @@ export default function AdminAvatarsPage() {
     const initialRows = flattenToPriceRows(bundle.avatars);
     setPendingCatalogBundle(null);
 
-    // Check DB for existing store items and pre-fill prices from DB.
-    // Do NOT sync to DB yet — let admin review and edit prices first.
     setSaveStatus({ loading: true });
     try {
+      // Step 1: Sync catalog to DB so that store items are created and
+      // itemId + existing prices are written back into the catalog options.
+      const payload = applyPricesToCatalog(bundle.avatars, initialRows);
+      await callRpc('avatar/sync_avatars', JSON.stringify(payload));
+
+      // Step 2: Fetch the saved catalog back — it now has itemId + prices
+      // from the DB (existing items keep their prices, new items get 0).
       const avatarSlugs = avatars.map((a) => a.slug);
       const mergedRows = await mergeDbPricesIntoRows(initialRows, avatarSlugs);
       setPriceRows(mergedRows);
@@ -779,18 +767,18 @@ export default function AdminAvatarsPage() {
       const existingCount = mergedRows.filter((r) => r.itemId).length;
       const newCount = mergedRows.length - existingCount;
       const msg = existingCount > 0
-        ? `Found ${existingCount} existing items (prices loaded from database)${newCount > 0 ? ` and ${newCount} new items` : ''}. Edit prices below, then click "Save to database".`
-        : `${newCount} new items. Set prices below, then click "Save to database".`;
+        ? `Synced. ${existingCount} items loaded with prices from database${newCount > 0 ? `, ${newCount} new items` : ''}. Edit below and save.`
+        : `Synced ${newCount} new items. Set prices below, then click "Save to database".`;
       setSaveStatus({ loading: false, result: msg });
 
       if (bundle.avatars[0]) {
         setPreviewCatalog(bundle.avatars[0].catalog?.categories ?? []);
         setPreviewSlug(bundle.avatars[0].slug);
       }
+      loadAvatarList();
     } catch (e) {
-      // DB fetch failed — show rows with default prices, admin can still edit
       setPriceRows(initialRows);
-      setSaveStatus({ loading: false, result: 'Could not load existing prices from database. Set prices below and save.' });
+      setSaveStatus({ loading: false, error: `Sync failed: ${e instanceof Error ? e.message : 'unknown error'}. You can still set prices and retry.` });
     }
   };
 
