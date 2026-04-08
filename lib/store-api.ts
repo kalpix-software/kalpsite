@@ -14,6 +14,9 @@ import type {
   UserAchievement,
   Gift,
   GetInventoryResponse,
+  PurchaseLineInput,
+  PurchaseSummaryResponse,
+  ConfirmPurchaseResponse,
 } from '@/lib/store-types';
 
 function unwrap<T>(raw: unknown): T {
@@ -45,20 +48,33 @@ export async function getItems(params: {
   return unwrap<GetItemsResponse>(raw);
 }
 
-export async function purchaseItem(params: {
-  itemId: string;
-  quantity?: number;
-  currencyType?: string;
-  requestId?: string;
-}): Promise<{ success: boolean; transactionId?: string; newBalance: Wallet }> {
-  const payload = JSON.stringify({
-    itemId: params.itemId,
-    quantity: params.quantity ?? 1,
-    ...(params.currencyType && { currencyType: params.currencyType }),
-    ...(params.requestId && { requestId: params.requestId }),
-  });
-  const raw = await callAdminRpc('store/purchase_item', payload);
-  return unwrap(raw);
+/** Step 1: Get a purchase summary (quote) for the given items. */
+export async function purchaseSummary(
+  items: PurchaseLineInput[],
+  requestId?: string,
+): Promise<PurchaseSummaryResponse> {
+  const payload = JSON.stringify({ items, ...(requestId && { requestId }) });
+  const raw = await callAdminRpc('store/purchase_summary', payload);
+  return unwrap<PurchaseSummaryResponse>(raw);
+}
+
+/** Step 2: Confirm the purchase using a quoteId (from purchase_summary). */
+export async function confirmPurchase(
+  quoteId: string,
+  requestId?: string,
+): Promise<ConfirmPurchaseResponse> {
+  const payload = JSON.stringify({ quoteId, ...(requestId && { requestId }) });
+  const raw = await callAdminRpc('store/confirm_purchase', payload);
+  return unwrap<ConfirmPurchaseResponse>(raw);
+}
+
+/** Convenience: one-shot purchase (summary → confirm) for a list of items. */
+export async function purchaseItems(
+  items: PurchaseLineInput[],
+  requestId?: string,
+): Promise<ConfirmPurchaseResponse> {
+  const summary = await purchaseSummary(items, requestId);
+  return confirmPurchase(summary.quoteId, requestId);
 }
 
 export async function getDeals(): Promise<StoreDeal[]> {

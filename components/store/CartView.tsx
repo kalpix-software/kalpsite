@@ -2,14 +2,13 @@
 
 import { useState } from 'react';
 import { X } from 'lucide-react';
-import { purchaseItem } from '@/lib/store-api';
+import { purchaseItems } from '@/lib/store-api';
+import { itemCurrency } from '@/lib/store-types';
 import type { StoreItem } from '@/lib/store-types';
-import type { Wallet } from '@/lib/store-types';
 
 interface CartLine {
   item: StoreItem;
   quantity: number;
-  currencyType: string;
 }
 
 interface CartViewProps {
@@ -32,26 +31,25 @@ export default function CartView({ cart, onClose, onRemove, onCheckoutSuccess }:
   const [checkingOut, setCheckingOut] = useState(false);
   const [error, setError] = useState('');
 
-  const totalCoins = cart
-    .filter((c) => c.currencyType === 'coins')
-    .reduce((s, c) => s + c.item.price * c.quantity, 0);
-  const totalGems = cart
-    .filter((c) => c.currencyType === 'gems')
-    .reduce((s, c) => s + c.item.price * c.quantity, 0);
+  const totalCoins = cart.reduce((s, c) => {
+    const cur = itemCurrency(c.item);
+    return cur.type === 'coins' ? s + cur.amount * c.quantity : s;
+  }, 0);
+  const totalGems = cart.reduce((s, c) => {
+    const cur = itemCurrency(c.item);
+    return cur.type === 'gems' ? s + cur.amount * c.quantity : s;
+  }, 0);
 
   const handleCheckout = async () => {
     if (cart.length === 0) return;
     setCheckingOut(true);
     setError('');
     try {
-      for (const line of cart) {
-        await purchaseItem({
-          itemId: line.item.itemId,
-          quantity: line.quantity,
-          currencyType: line.currencyType,
-          requestId: uuid(),
-        });
-      }
+      const items = cart.map((line) => ({
+        itemId: line.item.itemId,
+        quantity: line.quantity,
+      }));
+      await purchaseItems(items, uuid());
       onCheckoutSuccess();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Checkout failed');
@@ -76,32 +74,35 @@ export default function CartView({ cart, onClose, onRemove, onCheckoutSuccess }:
           {cart.length === 0 ? (
             <p className="text-slate-500">Cart is empty.</p>
           ) : (
-            cart.map((line) => (
-              <div
-                key={line.item.itemId}
-                className="flex items-center justify-between p-3 rounded-lg bg-slate-700/50"
-              >
-                <div>
-                  <p className="font-medium text-slate-200">{line.item.name}</p>
-                  <p className="text-xs text-slate-400">
-                    {line.item.price * line.quantity} {line.currencyType} × {line.quantity}
-                  </p>
-                </div>
-                <button
-                  onClick={() => onRemove(line.item.itemId)}
-                  className="text-red-400 hover:text-red-300 text-sm"
+            cart.map((line) => {
+              const cur = itemCurrency(line.item);
+              return (
+                <div
+                  key={line.item.itemId}
+                  className="flex items-center justify-between p-3 rounded-lg bg-slate-700/50"
                 >
-                  Remove
-                </button>
-              </div>
-            ))
+                  <div>
+                    <p className="font-medium text-slate-200">{line.item.name}</p>
+                    <p className="text-xs text-slate-400">
+                      {cur.amount * line.quantity} {cur.type} {line.quantity > 1 && `(×${line.quantity})`}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => onRemove(line.item.itemId)}
+                    className="text-red-400 hover:text-red-300 text-sm"
+                  >
+                    Remove
+                  </button>
+                </div>
+              );
+            })
           )}
         </div>
         {cart.length > 0 && (
           <>
-            <div className="p-4 border-t border-slate-700 flex justify-between text-slate-200">
-              {totalCoins > 0 && <span>Coins: {totalCoins}</span>}
-              {totalGems > 0 && <span>Gems: {totalGems}</span>}
+            <div className="p-4 border-t border-slate-700 flex gap-4 text-slate-200">
+              {totalCoins > 0 && <span className="text-amber-400">Coins: {totalCoins}</span>}
+              {totalGems > 0 && <span className="text-indigo-400">Gems: {totalGems}</span>}
             </div>
             {error && <p className="px-4 pb-2 text-red-400 text-sm">{error}</p>}
             <div className="p-4 pt-0">

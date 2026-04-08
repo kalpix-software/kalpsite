@@ -11,7 +11,8 @@ import AchievementsView from '@/components/store/AchievementsView';
 import GiftsView from '@/components/store/GiftsView';
 import InventoryView from '@/components/store/InventoryView';
 import CartView from '@/components/store/CartView';
-import type { StoreItem } from '@/lib/store-types';
+import { purchaseDeal, purchaseBundle } from '@/lib/store-api';
+import type { StoreItem, StoreDeal, Bundle } from '@/lib/store-types';
 
 const TABS = [
   { id: 'shop', label: 'Shop', icon: Store },
@@ -24,14 +25,25 @@ const TABS = [
 
 export type PlayTabId = (typeof TABS)[number]['id'];
 
+function uuid(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 export default function PlayPage() {
   const [tab, setTab] = useState<PlayTabId>('shop');
   const [walletKey, setWalletKey] = useState(0);
-  const [cart, setCart] = useState<{ item: StoreItem; quantity: number; currencyType: string }[]>([]);
+  const [cart, setCart] = useState<{ item: StoreItem; quantity: number }[]>([]);
   const [showCart, setShowCart] = useState(false);
+  const [actionMsg, setActionMsg] = useState('');
 
   const refreshWallet = useCallback(() => setWalletKey((k) => k + 1), []);
-  const addToCart = useCallback((item: StoreItem, quantity: number, currencyType: string) => {
+
+  const addToCart = useCallback((item: StoreItem, quantity: number) => {
     setCart((prev) => {
       const i = prev.findIndex((x) => x.item.itemId === item.itemId);
       if (i >= 0) {
@@ -39,13 +51,36 @@ export default function PlayPage() {
         next[i] = { ...next[i], quantity: next[i].quantity + quantity };
         return next;
       }
-      return [...prev, { item, quantity, currencyType }];
+      return [...prev, { item, quantity }];
     });
   }, []);
+
   const removeFromCart = useCallback((itemId: string) => {
     setCart((prev) => prev.filter((x) => x.item.itemId !== itemId));
   }, []);
   const clearCart = useCallback(() => setCart([]), []);
+
+  const handlePurchaseDeal = useCallback(async (deal: StoreDeal) => {
+    setActionMsg('');
+    try {
+      await purchaseDeal({ dealId: deal.dealId, requestId: uuid() });
+      refreshWallet();
+      setActionMsg(`Purchased deal: ${deal.item?.name ?? deal.dealId}`);
+    } catch (e) {
+      setActionMsg(e instanceof Error ? e.message : 'Deal purchase failed');
+    }
+  }, [refreshWallet]);
+
+  const handlePurchaseBundle = useCallback(async (bundle: Bundle) => {
+    setActionMsg('');
+    try {
+      await purchaseBundle({ bundleId: bundle.bundleId, requestId: uuid() });
+      refreshWallet();
+      setActionMsg(`Purchased bundle: ${bundle.name}`);
+    } catch (e) {
+      setActionMsg(e instanceof Error ? e.message : 'Bundle purchase failed');
+    }
+  }, [refreshWallet]);
 
   return (
     <div className="space-y-4">
@@ -72,6 +107,12 @@ export default function PlayPage() {
         </div>
       </div>
 
+      {actionMsg && (
+        <div className="px-4 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm text-slate-300">
+          {actionMsg}
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-2 border-b border-slate-700 pb-2">
         {TABS.map(({ id, label, icon: Icon }) => (
           <button
@@ -88,7 +129,13 @@ export default function PlayPage() {
       </div>
 
       <div className="min-h-[400px]">
-        {tab === 'shop' && <ShopView onAddToCart={addToCart} />}
+        {tab === 'shop' && (
+          <ShopView
+            onAddToCart={addToCart}
+            onPurchaseDeal={handlePurchaseDeal}
+            onPurchaseBundle={handlePurchaseBundle}
+          />
+        )}
         {tab === 'rewards' && <DailyRewardsView onClaimed={refreshWallet} />}
         {tab === 'battlepass' && <BattlePassView onAction={refreshWallet} />}
         {tab === 'achievements' && <AchievementsView onClaimed={refreshWallet} />}

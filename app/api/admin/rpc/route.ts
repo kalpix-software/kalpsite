@@ -24,7 +24,8 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   // Store – player view (same session as logged-in user)
   'store/get_wallet',
   'store/get_items',
-  'store/purchase_item',
+  'store/purchase_summary',
+  'store/confirm_purchase',
   'store/get_inventory',
   'store/equip_item',
   'store/get_deals',

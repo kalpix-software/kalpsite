@@ -22,13 +22,19 @@ export interface StoreItem {
   subcategory?: string;
   iconUrl?: string;
   previewUrl?: string;
-  currencyType: string;
-  price: number;
-  discountedPrice?: number;
-  quantityAvailable?: number;
-  quantityAddedToCart?: number;
+  price: Price;
+  discountedPriceCoins?: number;
+  discountedPriceGems?: number;
   isActive: boolean;
   isOwned?: boolean;
+  stock?: number;
+  metadata?: Record<string, string>;
+}
+
+/** Derive which currency an item uses (backend enforces only one non-zero). */
+export function itemCurrency(item: StoreItem): { type: 'coins' | 'gems'; amount: number } {
+  if (item.price.gems > 0) return { type: 'gems', amount: item.price.gems };
+  return { type: 'coins', amount: item.price.coins };
 }
 
 export interface StoreDeal {
@@ -182,4 +188,47 @@ export interface GetInventoryResponse {
   total: number;
   nextCursor?: string;
   hasMore: boolean;
+}
+
+// ─── Two-step purchase flow ───
+
+export interface PurchaseLineInput {
+  itemId: string;
+  quantity: number;
+}
+
+export interface PurchaseSummaryItem {
+  itemId: string;
+  name: string;
+  previewUrl: string;
+  currencyType: string;
+  price: number;
+  discountedPrice?: number;
+  discountedPercent?: number;
+  purchaseLimit: number;
+  quantityAvailable: number;
+  quantityAddedToCart: number;
+  quantity: number;
+  lineTotal: number;
+}
+
+export interface BillSummary {
+  subtotal: Price;
+  totalDiscount: Price;
+  total: Price;
+}
+
+export interface PurchaseSummaryResponse {
+  quoteId: string;
+  items: PurchaseSummaryItem[];
+  billSummary: BillSummary;
+}
+
+export interface ConfirmPurchaseResponse {
+  orderId: string;
+  orderNumber: string;
+  itemsPurchased: number;
+  totalCoins: number;
+  totalGems: number;
+  newBalance: Wallet;
 }
