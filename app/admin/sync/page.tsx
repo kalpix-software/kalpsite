@@ -684,35 +684,80 @@ export default function AdminAvatarsPage() {
     setCustomCategories((prev) => prev.filter((c) => c.key !== key));
   };
 
-  /** Fetch the saved avatar catalog from DB and merge itemId + prices into price rows.
-   *  The catalog options have itemId/price/currencyType set by processAvatarCatalog. */
+  /** Fetch store items from DB for each avatar and merge itemId + prices into price rows.
+   *
+   *  We need the avatarID (UUID) to know the store item slug pattern:
+   *    {avatarID}_{subcategoryKey}_{optionId}
+   *  The avatar list gives us avatarId for each slug.
+   */
   const mergeDbPricesIntoRows = async (rows: PriceRow[], avatarSlugs: string[]): Promise<PriceRow[]> => {
-    // Map by "subcategoryKey|optionId" → DB data from the catalog
-    const dbMap = new Map<string, { itemId: string; currencyType: string; price: number; discountedPrice: number; purchaseLimit: number }>();
-
-    for (const avatarSlug of avatarSlugs) {
+    // Step 1: Resolve avatar slug → avatarId (UUID) from the avatar list
+    const slugToAvatarId = new Map<string, string>();
+    for (const av of listAvatars) {
+      slugToAvatarId.set(av.slug, av.avatarId);
+    }
+    // If avatars not in list yet, fetch them
+    if (avatarSlugs.some((s) => !slugToAvatarId.has(s))) {
       try {
-        const raw = await callRpc('avatar/get_character_catalog', JSON.stringify({ slug: avatarSlug }));
-        const data = unwrapAdminRpcData<{ categories?: CatalogCategory[] }>(raw);
-        const categories = data?.categories ?? [];
-        for (const cat of categories) {
-          for (const sub of cat.subcategories ?? []) {
-            for (const opt of sub.options ?? []) {
-              const optAny = opt as CatalogOption & { itemId?: string };
-              if (!optAny.itemId) continue;
-              const matchKey = `${sub.key}|${opt.optionId}`;
-              dbMap.set(matchKey, {
-                itemId: optAny.itemId,
-                currencyType: opt.currencyType ?? 'coins',
-                price: opt.price ?? 0,
-                discountedPrice: opt.discountedPrice ?? 0,
-                purchaseLimit: opt.purchaseLimit ?? 1,
-              });
-            }
-          }
+        const data = await callRpc('avatar/admin_list_avatars', '{}') as { data?: { avatars?: AvatarListItem[] }; avatars?: AvatarListItem[] };
+        const raw = data?.data ?? data;
+        for (const av of raw?.avatars ?? []) {
+          slugToAvatarId.set(av.slug, av.avatarId);
         }
       } catch (e) {
-        console.warn(`Failed to fetch catalog for avatar ${avatarSlug}:`, e);
+        console.warn('Failed to fetch avatar list for ID resolution:', e);
+      }
+    }
+
+    // Step 2: Fetch store items for each avatar
+    type DbEntry = { itemId: string; coins: number; gems: number; discountedCoins: number; discountedGems: number; purchaseLimit: number };
+    // Key: "subcategoryKey|optionId"
+    const dbMap = new Map<string, DbEntry>();
+
+    for (const avatarSlug of avatarSlugs) {
+      const avatarId = slugToAvatarId.get(avatarSlug);
+      if (!avatarId) {
+        console.warn(`No avatarId found for slug "${avatarSlug}"`);
+        continue;
+      }
+      try {
+        // Use avatarId (UUID) as category — the backend resolves this via avatar_id column
+        const data = await callRpc('store/get_items', JSON.stringify({
+          upgradeType: 'avatar_upgrade',
+          category: avatarId,
+          includeInactive: true,
+          limit: 2000,
+        })) as { data?: { items?: Record<string, unknown>[] }; items?: Record<string, unknown>[] };
+        const raw = data?.data ?? data;
+        const items = raw?.items ?? [];
+        for (const item of items) {
+          // The store item slug is: {avatarId}_{subcategoryKey}_{optionId}
+          // Parse it to extract subcategoryKey and optionId for matching
+          const itemSlug = (item.slug as string) ?? '';
+          const prefix = avatarId + '_';
+          if (!itemSlug.startsWith(prefix)) continue;
+          const rest = itemSlug.slice(prefix.length); // "subcategory_optionId"
+          const firstUnderscore = rest.indexOf('_');
+          if (firstUnderscore < 0) continue;
+          const subKey = rest.slice(0, firstUnderscore);
+          const optId = rest.slice(firstUnderscore + 1);
+          if (!subKey || !optId) continue;
+
+          const price = item.price as { coins?: number; gems?: number } | undefined;
+          const metadata = item.metadata as Record<string, string> | undefined;
+          const limit = parseInt(metadata?.purchaseLimit ?? '1', 10);
+          const matchKey = `${subKey}|${optId}`;
+          dbMap.set(matchKey, {
+            itemId: (item.itemId as string) ?? '',
+            coins: price?.coins ?? 0,
+            gems: price?.gems ?? 0,
+            discountedCoins: (item.discountedPriceCoins as number) ?? 0,
+            discountedGems: (item.discountedPriceGems as number) ?? 0,
+            purchaseLimit: limit > 0 ? limit : 1,
+          });
+        }
+      } catch (e) {
+        console.warn(`Failed to fetch store items for avatar ${avatarSlug} (${avatarId}):`, e);
       }
     }
 
@@ -722,13 +767,14 @@ export default function AdminAvatarsPage() {
       const matchKey = `${row.subcategoryKey}|${row.optionId}`;
       const db = dbMap.get(matchKey);
       if (!db) return row;
-
+      const price = db.coins > 0 ? db.coins : db.gems;
+      const salePrice = db.discountedCoins > 0 ? db.discountedCoins : db.discountedGems;
       return {
         ...row,
         itemId: db.itemId,
-        currencyType: db.currencyType,
-        price: db.price,
-        salePrice: db.discountedPrice,
+        currencyType: db.gems > 0 ? 'gems' : 'coins',
+        price,
+        salePrice,
         purchaseLimit: db.purchaseLimit,
       };
     });
