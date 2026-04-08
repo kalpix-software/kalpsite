@@ -708,6 +708,7 @@ export default function AdminAvatarsPage() {
         })) as { data?: { items?: DbItem[] }; items?: DbItem[] };
         const raw = data?.data ?? data;
         const items = raw?.items ?? [];
+        console.log(`[mergeDbPrices] avatar=${avatarSlug}: fetched ${items.length} items from DB`, items.length > 0 ? items[0] : '(empty)');
         for (const item of items) {
           // Match key: subcategoryKey + optionId (same fields the price table uses)
           const subKey = item.subcategoryKey ?? '';
@@ -815,6 +816,9 @@ export default function AdminAvatarsPage() {
 
       // Step 3: Update prices for ALL items via admin API.
       // This is the authoritative write — overrides whatever the sync set.
+      const withIds = rowsWithIds.filter((r) => r.itemId);
+      console.log(`[saveToDatabase] ${rowsWithIds.length} total rows, ${withIds.length} have itemId`);
+      if (withIds.length > 0) console.log('[saveToDatabase] sample row:', withIds[0]);
       let updated = 0;
       let failed = 0;
       for (const row of rowsWithIds) {
