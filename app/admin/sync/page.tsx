@@ -731,16 +731,10 @@ export default function AdminAvatarsPage() {
         const raw = data?.data ?? data;
         const items = raw?.items ?? [];
         for (const item of items) {
-          // The store item slug is: {avatarId}_{subcategoryKey}_{optionId}
-          // Parse it to extract subcategoryKey and optionId for matching
-          const itemSlug = (item.slug as string) ?? '';
-          const prefix = avatarId + '_';
-          if (!itemSlug.startsWith(prefix)) continue;
-          const rest = itemSlug.slice(prefix.length); // "subcategory_optionId"
-          const firstUnderscore = rest.indexOf('_');
-          if (firstUnderscore < 0) continue;
-          const subKey = rest.slice(0, firstUnderscore);
-          const optId = rest.slice(firstUnderscore + 1);
+          // Use subcategoryKey and optionId fields directly from the backend response
+          // (parsing the slug fails for keys with underscores like "eye_color")
+          const subKey = (item.subcategoryKey as string) || (item.subcategory as string) || '';
+          const optId = (item.optionId as string) || '';
           if (!subKey || !optId) continue;
 
           const price = item.price as { coins?: number; gems?: number } | undefined;
@@ -844,18 +838,24 @@ export default function AdminAvatarsPage() {
       const payload = applyPricesToCatalog(parsed.avatars, priceRows);
       await callRpc('avatar/sync_avatars', JSON.stringify(payload));
 
-      // Step 2: Fetch itemIds for all rows (including newly created items from step 1).
+      // Step 2: Fetch itemIds from DB (newly created items from step 1 now have IDs).
+      // Only use this to resolve itemIds — keep admin-entered prices from priceRows.
       const avatarSlugs = parsed.avatars.map((a) => a.slug);
-      const rowsWithIds = await mergeDbPricesIntoRows(priceRows, avatarSlugs);
+      const dbRows = await mergeDbPricesIntoRows(priceRows, avatarSlugs);
+      const itemIdByKey = new Map<string, string>();
+      for (const r of dbRows) {
+        if (r.itemId) itemIdByKey.set(r.rowKey, r.itemId);
+      }
 
       // Step 3: Update prices for ALL items via admin API.
-      // This is the authoritative write — overrides whatever the sync set.
-      const withIds = rowsWithIds.filter((r) => r.itemId);
-      console.log(`[saveToDatabase] ${rowsWithIds.length} total rows, ${withIds.length} have itemId`);
+      // Use admin-entered priceRows (not DB values) as the authoritative source.
+      const rowsToSave = priceRows.map((r) => ({ ...r, itemId: itemIdByKey.get(r.rowKey) ?? r.itemId }));
+      const withIds = rowsToSave.filter((r) => r.itemId);
+      console.log(`[saveToDatabase] ${rowsToSave.length} total rows, ${withIds.length} have itemId`);
       if (withIds.length > 0) console.log('[saveToDatabase] sample row:', withIds[0]);
       let updated = 0;
       let failed = 0;
-      for (const row of rowsWithIds) {
+      for (const row of rowsToSave) {
         if (!row.itemId) continue;
         const coins = row.currencyType === 'coins' ? row.price : 0;
         const gems = row.currencyType === 'gems' ? row.price : 0;
@@ -877,7 +877,7 @@ export default function AdminAvatarsPage() {
       }
 
       // Update local state with itemIds
-      setPriceRows(rowsWithIds);
+      setPriceRows(rowsToSave);
 
       const msg = failed > 0
         ? `Saved ${updated} items, ${failed} failed. Check console for details.`

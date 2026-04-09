@@ -6,6 +6,7 @@ import { callAdminRpc, unwrapAdminRpcData } from '@/lib/admin-rpc';
 
 interface StoreItem {
   itemId: string;
+  slug?: string;
   name: string;
   description?: string;
   upgradeType?: string;
@@ -19,6 +20,7 @@ interface StoreItem {
   sortOrder?: number;
   metadata?: Record<string, string>;
   previewUrl?: string;
+  iconUrl?: string;
   purchaseLimit?: number;
   discountedPriceCoins?: number;
   discountedPriceGems?: number;
@@ -528,6 +530,9 @@ export default function AdminStorePage() {
       const raw = data?.data ?? data;
       const list = raw?.items ?? [];
       const totalCount = typeof raw?.total === 'number' ? raw.total : list.length;
+      if (process.env.NODE_ENV !== 'production' || list.length > 0) {
+        console.log('[admin/store] raw response keys:', Object.keys(data ?? {}), 'items sample:', list[0] ? JSON.stringify(list[0]).slice(0, 300) : '(empty)');
+      }
       setItems(Array.isArray(list) ? list : []);
       setTotal(totalCount);
     } catch (e) {
@@ -681,20 +686,30 @@ export default function AdminStorePage() {
                 ) : (
                   <tr key={item.itemId} className="border-b border-slate-700 hover:bg-slate-800/50">
                     <td className="py-2 px-3">
-                      <span className="font-medium text-slate-100">{item.name}</span>
-                      <br />
-                      <span className="text-xs text-slate-500">{item.itemId}</span>
+                      <div className="flex items-center gap-2">
+                        {(item.previewUrl || item.iconUrl) ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={item.previewUrl || item.iconUrl} alt="" className="h-8 w-8 rounded border border-slate-600 object-cover flex-shrink-0" />
+                        ) : (
+                          <div className="h-8 w-8 rounded border border-slate-700 bg-slate-800 flex-shrink-0" />
+                        )}
+                        <div>
+                          <span className="font-medium text-slate-100">{item.name || item.slug || '(unnamed)'}</span>
+                          <br />
+                          <span className="text-xs text-slate-500">{item.itemId}</span>
+                        </div>
+                      </div>
                     </td>
                     <td className="py-2 px-3 text-slate-300 text-xs">
-                      <span className="px-2 py-0.5 rounded bg-slate-700">{item.upgradeType ?? item.category}</span>
-                      <span className="ml-1">{item.gameId || item.avatarId || item.category}</span>
-                      <span className="ml-1 text-slate-500">/ {item.subcategory ?? item.type ?? '–'}</span>
+                      {(item.upgradeType || item.category) && <span className="px-2 py-0.5 rounded bg-slate-700">{item.upgradeType || item.category}</span>}
+                      <span className="ml-1">{item.gameId || item.avatarId || (item.upgradeType ? item.category : '') || '–'}</span>
+                      <span className="ml-1 text-slate-500">/ {item.subcategory || item.type || '–'}</span>
                     </td>
                     <td className="py-2 px-3 text-slate-300">
-                      {item.price.coins > 0 && <span className="text-amber-400">{item.price.coins} coins</span>}
-                      {item.price.coins > 0 && item.price.gems > 0 && ' / '}
-                      {item.price.gems > 0 && <span className="text-purple-400">{item.price.gems} gems</span>}
-                      {item.price.coins === 0 && item.price.gems === 0 && <span className="text-green-400">Free</span>}
+                      {(item.price?.coins ?? 0) > 0 && <span className="text-amber-400">{item.price.coins} coins</span>}
+                      {(item.price?.coins ?? 0) > 0 && (item.price?.gems ?? 0) > 0 && ' / '}
+                      {(item.price?.gems ?? 0) > 0 && <span className="text-purple-400">{item.price.gems} gems</span>}
+                      {(item.price?.coins ?? 0) === 0 && (item.price?.gems ?? 0) === 0 && <span className="text-green-400">Free</span>}
                       {((item.discountedPriceCoins ?? 0) > 0 || (item.discountedPriceGems ?? 0) > 0) && (
                         <span className="ml-1 px-1.5 py-0.5 rounded bg-red-600/20 text-red-400 text-xs font-medium">
                           Sale: {(item.discountedPriceCoins ?? 0) > 0 ? `${item.discountedPriceCoins} coins` : ''}{(item.discountedPriceCoins ?? 0) > 0 && (item.discountedPriceGems ?? 0) > 0 ? ' / ' : ''}{(item.discountedPriceGems ?? 0) > 0 ? `${item.discountedPriceGems} gems` : ''}
