@@ -27,6 +27,7 @@ export default function Navigation() {
     { name: 'Home', href: '/' },
     { name: 'Features', href: isHome ? '#features' : '/#features' },
     { name: 'Spaces', href: isHome ? '#games' : '/#games' },
+    { name: 'App', href: isHome ? '#showcase' : '/#showcase' },
     { name: 'About', href: '/about' },
     { name: 'Contact', href: '/contact' },
   ]

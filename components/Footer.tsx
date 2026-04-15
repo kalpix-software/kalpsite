@@ -15,6 +15,7 @@ const footerLinks = {
 	product: [
 		{ name: "Features", href: "/#features" },
 		{ name: "Games", href: "/#games" },
+		{ name: "App", href: "/#showcase" },
 	],
 	company: [
 		{ name: "About", href: "/about" },
