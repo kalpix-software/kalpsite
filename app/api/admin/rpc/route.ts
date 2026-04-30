@@ -68,6 +68,12 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   // Message reports – admin only
   'chat/admin_list_message_reports',
   'chat/admin_update_message_report_status',
+  // Chat shop – admin only (see lib/chat-shop-api.ts callers).
+  'chat_shop/admin_list_items',
+  'chat_shop/admin_upsert_item',
+  'chat_shop/admin_publish_item',
+  'chat_shop/admin_archive_item',
+  'chat_shop/admin_grant_item',
 ]);
 
 /**
