@@ -22,7 +22,20 @@ interface Conversation {
   lastMessage: string;
   lastMessageAt: number;
   unreadCount: number;
+  /**
+   * Lifecycle status returned by `admin/get_fake_user_conversations`:
+   *   - "pending_request" — a real user DM'd a bot but the bot (admin)
+   *     hasn't accepted the message request yet
+   *   - "declined"        — the bot declined the request
+   *   - "active"          — accepted / no request
+   */
   status: string;
+  /** Mirror of ChatChannel.is_request — true while the request is pending. */
+  isRequest?: boolean;
+  /** "pending" | "accepted" | "declined" | "deleted" | "" */
+  requestStatus?: string;
+  /** The fake user expected to accept (= the bot id). */
+  requestRecipientId?: string;
   isOnline?: boolean;
   lastSeenAt?: number;
 }
@@ -292,6 +305,11 @@ export default function AdminChatPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Inbox vs Requests tab. Mirrors the user-facing chat app:
+  //   - 'inbox'    → accepted conversations
+  //   - 'requests' → pending DM requests where the bot is the recipient
+  const [tab, setTab] = useState<'inbox' | 'requests'>('inbox');
+  const [respondingRequestId, setRespondingRequestId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -498,17 +516,66 @@ export default function AdminChatPage() {
   }, [selectedConvo?.conversationId, wsUrl, fetchMessages]);
 
   useEffect(() => {
+    // Split inbox vs requests, then optionally narrow by search query.
+    // A conversation belongs to "requests" only while the bot still has to
+    // respond — i.e. status is 'pending_request' AND the bot is the
+    // recipient of the request.
+    const isPendingForBot = (c: Conversation) =>
+      c.status === 'pending_request' &&
+      (!c.requestRecipientId || c.requestRecipientId === c.botId);
+
+    const byTab = conversations.filter(c =>
+      tab === 'requests' ? isPendingForBot(c) : !isPendingForBot(c),
+    );
+
     if (!searchQuery.trim()) {
-      setFilteredConversations(conversations);
+      setFilteredConversations(byTab);
     } else {
       const q = searchQuery.toLowerCase();
       setFilteredConversations(
-        conversations.filter(
-          c => c.username.toLowerCase().includes(q) || c.botName.toLowerCase().includes(q)
-        )
+        byTab.filter(
+          c => c.username.toLowerCase().includes(q) || c.botName.toLowerCase().includes(q),
+        ),
       );
     }
-  }, [searchQuery, conversations]);
+  }, [searchQuery, conversations, tab]);
+
+  // Accept / decline a pending DM request on behalf of the bot.
+  // After the action lands, refresh the conversation list so the row moves
+  // from "Requests" into "Inbox" (accepted) or disappears (declined).
+  const respondToRequest = useCallback(
+    async (convo: Conversation, action: 'accept' | 'decline') => {
+      if (respondingRequestId === convo.conversationId) return;
+      setRespondingRequestId(convo.conversationId);
+      try {
+        await callAdminRpc(
+          action === 'accept'
+            ? 'admin/accept_fake_user_dm_request'
+            : 'admin/decline_fake_user_dm_request',
+          JSON.stringify({
+            channelId: convo.conversationId,
+            fakeUserId: convo.botId,
+          }),
+        );
+        // Refetch — single source of truth lives on the server.
+        await fetchConversations();
+        // If the user was viewing this request, drop the selection on
+        // decline (channel is no longer interactable) and keep it on
+        // accept (it just transitioned to active).
+        if (action === 'decline' && selectedConvo?.conversationId === convo.conversationId) {
+          setSelectedConvo(null);
+        }
+      } catch (err) {
+        console.error('respondToRequest failed', err);
+        setError(
+          `Failed to ${action} request${err instanceof Error ? `: ${err.message}` : ''}`,
+        );
+      } finally {
+        setRespondingRequestId(null);
+      }
+    },
+    [respondingRequestId, fetchConversations, selectedConvo?.conversationId],
+  );
 
   // Position reaction picker above the anchor button (so it's not clipped by overflow)
   useLayoutEffect(() => {
@@ -811,6 +878,44 @@ export default function AdminChatPage() {
               className="w-full pl-9 pr-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
             />
           </div>
+
+          {/* Inbox / Requests tabs — same lifecycle as the user-facing chat. */}
+          <div className="mt-3 flex bg-slate-800 rounded-lg p-1 text-xs">
+            {(() => {
+              const requestCount = conversations.filter(
+                c =>
+                  c.status === 'pending_request' &&
+                  (!c.requestRecipientId || c.requestRecipientId === c.botId),
+              ).length;
+              const inboxCount = conversations.length - requestCount;
+              const tabBtn = (kind: 'inbox' | 'requests', label: string, count: number) => (
+                <button
+                  type="button"
+                  onClick={() => setTab(kind)}
+                  className={`flex-1 px-3 py-1.5 rounded-md transition ${
+                    tab === kind
+                      ? 'bg-slate-700 text-slate-100'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {label}
+                  <span
+                    className={`ml-2 inline-flex items-center justify-center px-1.5 rounded-full text-[10px] ${
+                      tab === kind ? 'bg-indigo-500 text-white' : 'bg-slate-700 text-slate-300'
+                    }`}
+                  >
+                    {count}
+                  </span>
+                </button>
+              );
+              return (
+                <>
+                  {tabBtn('inbox', 'Inbox', inboxCount)}
+                  {tabBtn('requests', 'Requests', requestCount)}
+                </>
+              );
+            })()}
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -821,8 +926,12 @@ export default function AdminChatPage() {
           ) : filteredConversations.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-32 text-slate-500 text-sm">
               <MessageSquare className="w-8 h-8 mb-2 opacity-30" />
-              <p>No conversations yet</p>
-              <p className="text-xs mt-1">Messages from users to bot players will appear here</p>
+              <p>{tab === 'requests' ? 'No pending requests' : 'No conversations yet'}</p>
+              <p className="text-xs mt-1">
+                {tab === 'requests'
+                  ? 'When a real user sends the first message to a bot, it will appear here.'
+                  : 'Messages from users to bot players will appear here.'}
+              </p>
             </div>
           ) : (
             filteredConversations.map(convo => (
@@ -880,6 +989,34 @@ export default function AdminChatPage() {
                     </span>
                   )}
                 </div>
+
+                {/* Pending DM request — accept/decline acts on behalf of the bot. */}
+                {tab === 'requests' && (
+                  <div className="mt-2 flex items-center gap-2 pl-13">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        respondToRequest(convo, 'accept');
+                      }}
+                      disabled={respondingRequestId === convo.conversationId}
+                      className="flex-1 px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed text-white text-xs font-medium"
+                    >
+                      {respondingRequestId === convo.conversationId ? '...' : 'Accept'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        respondToRequest(convo, 'decline');
+                      }}
+                      disabled={respondingRequestId === convo.conversationId}
+                      className="flex-1 px-3 py-1.5 rounded-md bg-slate-700 hover:bg-slate-600 disabled:opacity-60 disabled:cursor-not-allowed text-slate-200 text-xs font-medium"
+                    >
+                      Decline
+                    </button>
+                  </div>
+                )}
               </button>
             ))
           )}
