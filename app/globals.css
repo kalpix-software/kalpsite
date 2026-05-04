@@ -63,3 +63,15 @@ body {
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   transition-duration: 150ms;
 }
+
+/* Chessground owns its own animations (piece movement, fades). The global
+   `* { transition: transform 150ms }` rule above causes the selection /
+   last-move / move-dest highlight squares — which chessground re-positions
+   via `transform: translate(...)` rather than re-mounting — to *slide*
+   between squares as you tap, instead of snapping. Kill transitions on
+   any element inside the chessground board container. */
+.cg-wrap *,
+cg-container *,
+cg-board * {
+  transition: none !important;
+}
