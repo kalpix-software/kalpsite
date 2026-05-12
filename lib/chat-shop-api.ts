@@ -213,6 +213,42 @@ export async function grantItem(req: GrantRequest): Promise<{ granted: boolean; 
 }
 
 // ----------------------------------------------------------------------------
+// Slice 4b — chat_shop/admin_set_trending.
+// Replaces the trending pack list for one pack kind atomically. Powers the
+// picker's trending carousel (inside picker/screen) and the trending list
+// page (picker/trending). Per-kind atomic replace — changing sticker
+// trending leaves gif and emote rows untouched.
+// ----------------------------------------------------------------------------
+
+export type PackKind = 'sticker' | 'gif' | 'emote';
+
+export const PACK_KIND_LABEL: Record<PackKind, string> = {
+  sticker: 'Sticker packs',
+  gif: 'GIF packs',
+  emote: 'Emote packs',
+};
+
+export interface TrendingPackEntry {
+  packId: string;
+  rank: number;
+}
+
+export interface SetTrendingRequest {
+  packKind: PackKind;
+  items: TrendingPackEntry[];
+}
+
+export interface SetTrendingResponse {
+  ok: boolean;
+  count: number;
+}
+
+export async function setTrendingPacks(req: SetTrendingRequest): Promise<SetTrendingResponse> {
+  const raw = await callAdminRpc('chat_shop/admin_set_trending', JSON.stringify(req));
+  return unwrapAdminRpcData<SetTrendingResponse>(raw);
+}
+
+// ----------------------------------------------------------------------------
 // CDN upload wrapper — reuses /api/admin/upload (itemType=chat_item).
 // Returns { publicUrl, key } so a form can drop the URL directly into the
 // matching asset field.

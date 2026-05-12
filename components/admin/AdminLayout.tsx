@@ -7,6 +7,7 @@ import {
   LayoutDashboard, Store, RefreshCw, LogOut, BarChart3, Package,
   CalendarCheck, Tag, Swords, Trophy, Gift, ChevronDown, ChevronRight,
   MessageSquare, Gamepad2, Users, Flag, MessageCircleWarning, Palette,
+  Sparkles, TrendingUp,
 } from 'lucide-react';
 
 const SESSION_URL = '/api/auth/session';
@@ -122,6 +123,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         { href: '/admin/bundles', label: 'Bundles', icon: Package },
         { href: '/admin/sync', label: 'Avatars', icon: RefreshCw },
         { href: '/admin/chat-shop', label: 'Chat Shop', icon: Palette },
+        { href: '/admin/featured', label: 'Featured', icon: Sparkles },
+        { href: '/admin/trending', label: 'Trending Packs', icon: TrendingUp },
       ],
     },
     {

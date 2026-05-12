@@ -76,6 +76,11 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   'chat_shop/admin_publish_item',
   'chat_shop/admin_archive_item',
   'chat_shop/admin_grant_item',
+  // Chat redesign Slice 4b — admin trending writes for the picker.
+  'chat_shop/admin_set_trending',
+  // Cross-vertical shop — admin featured writes for the All-tab carousel.
+  'shop/admin_set_featured',
+  'shop/admin_list_featured',
 ]);
 
 /**
