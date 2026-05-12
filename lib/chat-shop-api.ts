@@ -149,6 +149,12 @@ export interface AdminListItem {
   subcategory: string;
   slug: string;
   name: string;
+  /** Round-tripped on edit so the form pre-fills correctly. */
+  description: string;
+  /** Round-tripped on edit so the form pre-fills correctly. */
+  iconUrl: string;
+  /** Round-tripped on edit so the form pre-fills correctly. */
+  previewUrl: string;
   status: ItemStatus;
   isDefault: boolean;
   rarity: Rarity;

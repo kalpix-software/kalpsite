@@ -32,6 +32,7 @@ import {
   ThemeFields,
   defaultAssetsFor,
 } from '@/components/admin/chat-shop/SubcategoryFields';
+import { AssetUploader } from '@/components/admin/chat-shop/AssetUploader';
 
 const STATUS_FILTERS: { value: ItemStatus | ''; label: string }[] = [
   { value: '', label: 'All' },
@@ -198,9 +199,14 @@ export default function ChatShopAdminPage() {
         loading={loading}
         loadError={loadError}
         onEdit={(it) => {
-          // Load full assets by re-opening a shell draft — we don't have
-          // the detail fields in the list endpoint, so the admin gets a
-          // fresh assets scaffold and fills in what they want to change.
+          // The detail-table assets (bubble 9-slice, pack items, …) are not
+          // returned by the admin list, so we still scaffold those from
+          // defaults — the admin re-confirms or re-uploads them as needed.
+          //
+          // The top-level store_items fields we DO have on the list row
+          // (description, iconUrl, previewUrl) are round-tripped so the
+          // admin doesn't accidentally wipe a previously uploaded preview
+          // image when editing rarity / status / price.
           const assets = defaultAssetsFor(it.subcategory as Subcategory);
           setEditing({
             mode: 'edit',
@@ -209,9 +215,9 @@ export default function ChatShopAdminPage() {
               subcategory: it.subcategory as Subcategory,
               slug: it.slug,
               name: it.name,
-              description: '',
-              iconUrl: '',
-              previewUrl: '',
+              description: it.description ?? '',
+              iconUrl: it.iconUrl ?? '',
+              previewUrl: it.previewUrl ?? '',
               currencyType: 'coins',
               price: 0,
               rarity: it.rarity,
@@ -576,6 +582,34 @@ function ItemMetaFields({
           className="px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-slate-200"
         />
       </label>
+
+      {/*
+        Tile preview / icon image. Used as the shop-tile thumbnail across
+        every reader (chat appearance screen, the legacy "All" tab, the
+        per-subcategory list). For sticker/gif/emote packs, bubbles, and
+        backgrounds the backend auto-mirrors the typed hero asset
+        (pack.coverUrl, bubbleStyle.sentImageUrl, background.imageUrl)
+        into preview_url at save time — so this field is *optional* for
+        those subcategories and only used when the admin wants a custom
+        thumbnail different from the hero.
+
+        For themes and fonts there is no typed hero image source, so this
+        field is the only way to populate the tile thumbnail. Without an
+        upload here, theme tiles render with an empty previewUrl in the
+        shop.
+
+        Uploads land in the same R2 bucket as every other chat asset via
+        the existing uploadChatAsset pipeline.
+      */}
+      <div className="md:col-span-2">
+        <AssetUploader
+          label="Tile preview image (optional for packs / bubbles / backgrounds; required for themes & fonts)"
+          value={draft.previewUrl || ''}
+          onChange={(url) => onChange({ previewUrl: url, iconUrl: draft.iconUrl || url })}
+          subcategory={draft.subcategory}
+          fileLabel="image"
+        />
+      </div>
 
       <div className="flex items-center gap-4 text-xs text-slate-400">
         <label className="flex items-center gap-2">
