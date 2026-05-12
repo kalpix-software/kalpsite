@@ -127,6 +127,69 @@ function TextField({
   );
 }
 
+// TagsField renders a single-line text input for a comma-separated tag list.
+//
+// Why a dedicated component instead of TextField + onChange split:
+// the naive `value={tags.join(',')}` + `onChange={v => split.filter(Boolean)}`
+// pattern strips the trailing comma on every keystroke, making it impossible
+// to type a second tag. This component keeps an internal text buffer so the
+// user can freely type commas, spaces, and trailing commas, and only flushes
+// a parsed string[] to the parent on blur or Enter.
+function TagsField({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string[];
+  onChange: (tags: string[]) => void;
+  placeholder?: string;
+}) {
+  // Local buffer mirroring what the user has typed. Initialized from the
+  // current array; re-synced via useEffect when the parent's content actually
+  // changes (using the joined string as the dep so a new-array-same-content
+  // re-render from the parent doesn't clobber in-progress edits).
+  const joined = value.join(', ');
+  const [text, setText] = useState(joined);
+  useEffect(() => {
+    setText(joined);
+  }, [joined]);
+
+  const flush = () => {
+    const next = text
+      .split(',')
+      .map((x) => x.trim())
+      .filter(Boolean);
+    // Avoid an unnecessary onChange that would just rebroadcast the same
+    // tags and trigger a re-render with no semantic change.
+    if (next.join('') !== value.join('')) {
+      onChange(next);
+    }
+  };
+
+  return (
+    <label className="flex flex-col gap-1 text-xs text-slate-400">
+      <span>{label}</span>
+      <input
+        type="text"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={flush}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            flush();
+            (e.currentTarget as HTMLInputElement).blur();
+          }
+        }}
+        placeholder={placeholder ?? 'e.g. cat, happy, smile'}
+        className="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-200"
+      />
+    </label>
+  );
+}
+
 function ColorField({
   label,
   value,
@@ -553,17 +616,10 @@ export function PackFields({
                   </div>
                 )}
                 <div className="flex-1 min-w-[200px]">
-                  <TextField
+                  <TagsField
                     label="Tags (comma-separated)"
-                    value={it.tags.join(',')}
-                    onChange={(v) =>
-                      patchItem(i, {
-                        tags: v
-                          .split(',')
-                          .map((x) => x.trim())
-                          .filter(Boolean),
-                      })
-                    }
+                    value={it.tags}
+                    onChange={(tags) => patchItem(i, { tags })}
                   />
                 </div>
                 <NumField
