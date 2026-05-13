@@ -24,12 +24,13 @@
  * the existing list rather than always start fresh.
  */
 
-import { useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, Plus, Save, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
 import {
   PACK_KIND_LABEL,
   PackKind,
   TrendingPackEntry,
+  listTrendingPacks,
   setTrendingPacks,
 } from '@/lib/chat-shop-api';
 
@@ -37,6 +38,8 @@ const KIND_OPTIONS: PackKind[] = ['sticker', 'gif', 'emote'];
 
 interface DraftRow {
   packId: string;
+  /** Joined from store_items.name; empty when the row is freshly added by the admin. */
+  packName?: string;
 }
 
 const MAX_TRENDING = 100;
@@ -51,10 +54,48 @@ export default function TrendingAdminPage() {
     gif: [],
     emote: [],
   });
+  // Track which kinds have been hydrated from the server so a tab switch
+  // doesn't refetch and wipe local edits. A user can force a reload via the
+  // Refresh button which clears the flag.
+  const loadedKinds = useRef<Record<PackKind, boolean>>({
+    sticker: false,
+    gif: false,
+    emote: false,
+  });
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState('');
 
   const draft = draftByKind[activeKind];
+
+  // Fetch the currently-published trending list for the active kind. Pulled
+  // out as a callback so the Refresh button and the mount/tab-switch effect
+  // both share the same code path.
+  const loadActiveKind = useCallback(async (kind: PackKind) => {
+    setLoading(true);
+    try {
+      const resp = await listTrendingPacks(kind);
+      setDraftByKind((prev) => ({
+        ...prev,
+        [kind]: resp.items.map((it) => ({ packId: it.packId, packName: it.packName })),
+      }));
+      loadedKinds.current[kind] = true;
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : 'Failed to load trending');
+      setTimeout(() => setToast(''), 2500);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Hydrate when the active kind changes (and on mount). Skips kinds we've
+  // already loaded once in this session so unsaved edits aren't wiped just
+  // because the admin switched tabs and switched back.
+  useEffect(() => {
+    if (!loadedKinds.current[activeKind]) {
+      void loadActiveKind(activeKind);
+    }
+  }, [activeKind, loadActiveKind]);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -134,12 +175,23 @@ export default function TrendingAdminPage() {
           <p className="text-sm text-slate-400 mt-1">
             Per-kind trending list shown in the chat picker carousel + the full trending page.
             Saves replace the entire list for the selected kind atomically — see{' '}
-            <span className="text-slate-200">chat_shop/admin_set_trending</span>.
-          </p>
-          <p className="text-xs text-amber-400 mt-2">
-            Note: this v1 page is write-only. The current published list is not pre-loaded; saving replaces whatever is published. A read RPC is a follow-up.
+            <span className="text-slate-200">chat_shop/admin_set_trending</span>. The
+            currently-published list is loaded on tab open via{' '}
+            <span className="text-slate-200">chat_shop/admin_list_trending</span>.
           </p>
         </div>
+        <button
+          onClick={() => {
+            loadedKinds.current[activeKind] = false;
+            void loadActiveKind(activeKind);
+          }}
+          disabled={loading}
+          className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200 disabled:opacity-50 px-3 py-1.5 border border-slate-700 rounded"
+          title="Discard local edits and reload the published list"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          {loading ? 'Loading…' : 'Refresh'}
+        </button>
       </header>
 
       {toast && (
@@ -231,10 +283,21 @@ export default function TrendingAdminPage() {
               <div className="flex-1">
                 <label className="block text-[10px] uppercase tracking-wider text-slate-500 mb-1">
                   Pack ID (UUID)
+                  {row.packName ? (
+                    <span className="ml-2 text-slate-300 normal-case tracking-normal">
+                      — {row.packName}
+                    </span>
+                  ) : null}
                 </label>
                 <input
                   value={row.packId}
-                  onChange={(e) => updateRow(idx, { packId: e.target.value })}
+                  onChange={(e) =>
+                    // Clearing the joined name on edit prevents a stale label
+                    // (e.g. the old pack's name) lingering after the admin
+                    // pastes in a different UUID. The name will repopulate on
+                    // the next Refresh / page load.
+                    updateRow(idx, { packId: e.target.value, packName: undefined })
+                  }
                   className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-sm font-mono text-slate-200 focus:border-indigo-500 outline-none"
                   placeholder="00000000-0000-0000-0000-000000000000"
                 />

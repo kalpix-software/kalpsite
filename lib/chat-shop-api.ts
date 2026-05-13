@@ -254,6 +254,27 @@ export async function setTrendingPacks(req: SetTrendingRequest): Promise<SetTren
   return unwrapAdminRpcData<SetTrendingResponse>(raw);
 }
 
+// chat_shop/admin_list_trending — read counterpart of setTrendingPacks.
+// Returns the currently-published trending entries for one pack kind,
+// ordered by rank ascending, with the parent pack name joined in so the
+// editor can show "Music Stickers (uuid)" instead of a bare UUID.
+
+export interface ListTrendingItem {
+  packId: string;
+  rank: number;
+  /** store_items.name for the pack — empty string if the row was archived. */
+  packName: string;
+}
+
+export interface ListTrendingResponse {
+  items: ListTrendingItem[];
+}
+
+export async function listTrendingPacks(packKind: PackKind): Promise<ListTrendingResponse> {
+  const raw = await callAdminRpc('chat_shop/admin_list_trending', JSON.stringify({ packKind }));
+  return unwrapAdminRpcData<ListTrendingResponse>(raw);
+}
+
 // ----------------------------------------------------------------------------
 // CDN upload wrapper — reuses /api/admin/upload (itemType=chat_item).
 // Returns { publicUrl, key } so a form can drop the URL directly into the
