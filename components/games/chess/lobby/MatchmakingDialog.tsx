@@ -13,14 +13,15 @@ import { lobbyTheme } from '@/components/games/shell/theme';
 
 import { DialogShell } from './CreatePrivateDialog';
 
+// Human-search window before falling back to a bot.
 const HUMAN_WAIT_MS = 5_000;
-const RATING_BAND = 150;
 
 export interface MatchmakingDialogProps {
   client: KalpixClient;
   games: GameApi;
   timeControl: 'blitz' | 'rapid';
   rating: number;
+  provisional?: boolean;
   onClose(cancelled: boolean): void;
   onMatchReady(matchId: string): void;
 }
@@ -47,16 +48,23 @@ export default function MatchmakingDialog(p: MatchmakingDialogProps) {
           setSecondsLeft((s) => Math.max(0, s - 1));
         }, 1000);
 
+        // One ticket with an IDENTICAL query for every player (the custom
+        // matchmaker groups by exact query string, so per-player rating must NOT
+        // be in the query). Rating + provisional are passed as properties; the
+        // server matchmaker pairs within a rating band that widens with ticket
+        // age (±150→±350→±800 established; ±400→±1000 provisional). After
+        // HUMAN_WAIT_MS with no human in band, fall back to a bot.
         const handle = findMatch(p.client.socket, {
           minCount: 2,
           maxCount: 2,
-          query: `+properties.gameId:chess +properties.timeControl:${p.timeControl} +properties.rated:true properties.rating:>=${
-            p.rating - RATING_BAND
-          } properties.rating:<=${p.rating + RATING_BAND}`,
+          query: `+properties.gameId:chess +properties.timeControl:${p.timeControl} +properties.rated:true`,
           stringProperties: {
             gameId: 'chess',
             timeControl: p.timeControl,
             rated: 'true',
+            // Server-side matchmaker expands the rating band by ticket age; this
+            // tells it to start wider for unsettled (provisional) players.
+            provisional: p.provisional ? 'true' : 'false',
           },
           numericProperties: { rating: p.rating },
           timeoutMs: HUMAN_WAIT_MS,
@@ -102,7 +110,7 @@ export default function MatchmakingDialog(p: MatchmakingDialogProps) {
       handleRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.timeControl, p.rating]);
+  }, [p.timeControl, p.rating, p.provisional]);
 
   const cancel = () => {
     handleRef.current?.cancel();

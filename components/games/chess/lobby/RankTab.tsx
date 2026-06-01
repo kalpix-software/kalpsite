@@ -6,13 +6,6 @@ import { Crown, Medal, User as UserIcon, Users } from 'lucide-react';
 import type { GameApi, LeaderboardEntry } from '@/lib/kalpix-web-sdk/games';
 import { lobbyTheme } from '@/components/games/shell/theme';
 
-type Period = 'daily' | 'weekly' | 'alltime';
-const PERIODS: { key: Period; label: string }[] = [
-  { key: 'daily', label: 'Daily' },
-  { key: 'weekly', label: 'Weekly' },
-  { key: 'alltime', label: 'All Time' },
-];
-
 export default function RankTab({
   games,
   myUserId,
@@ -20,7 +13,6 @@ export default function RankTab({
   games: GameApi;
   myUserId: string;
 }) {
-  const [period, setPeriod] = useState<Period>('alltime');
   const [entries, setEntries] = useState<LeaderboardEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,7 +21,7 @@ export default function RankTab({
     setEntries(null);
     setError(null);
     games
-      .getLeaderboard({ gameId: 'chess', period, limit: 50 })
+      .getLeaderboard({ gameId: 'chess', limit: 50 })
       .then((r) => {
         if (cancelled) return;
         setEntries(r.entries ?? []);
@@ -41,33 +33,10 @@ export default function RankTab({
     return () => {
       cancelled = true;
     };
-  }, [period, games]);
+  }, [games]);
 
   return (
     <div className="flex flex-col gap-3 px-5 pb-32 pt-4">
-      {/* Period pills */}
-      <div
-        className="flex gap-1 rounded-full p-1"
-        style={{ background: lobbyTheme.cardSoft }}
-      >
-        {PERIODS.map((p) => {
-          const active = p.key === period;
-          return (
-            <button
-              key={p.key}
-              onClick={() => setPeriod(p.key)}
-              className="flex-1 rounded-full py-2 text-sm font-medium transition-colors"
-              style={{
-                background: active ? lobbyTheme.primary : 'transparent',
-                color: active ? '#fff' : lobbyTheme.textMuted,
-              }}
-            >
-              {p.label}
-            </button>
-          );
-        })}
-      </div>
-
       {error && (
         <div
           className="rounded-lg p-3 text-sm"
@@ -159,7 +128,7 @@ function RankRow({ e, isMe }: { e: LeaderboardEntry; isMe: boolean }) {
       <div className="text-right">
         <div className="text-sm font-semibold text-white">{e.score}</div>
         <div className="text-xs" style={{ color: lobbyTheme.textDim }}>
-          {e.numScore} games
+          Rating · {e.numScore} games
         </div>
       </div>
     </div>

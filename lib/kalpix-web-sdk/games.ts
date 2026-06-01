@@ -80,6 +80,20 @@ export interface LeaderboardResponse {
   ownerEntry?: LeaderboardEntry;
 }
 
+export interface RatingResponse {
+  userId: string;
+  gameId: string;
+  rating: number;
+  deviation: number;
+  volatility: number;
+  numResults: number;
+  peakRating: number;
+  provisional: boolean;
+  ranked: boolean;
+  rank?: number;
+  updatedAt: number;
+}
+
 export interface RulesResponse {
   gameId: string;
   title: string;
@@ -131,18 +145,23 @@ export class GameApi {
     });
   }
 
+  // One Glicko-2 rating board per game; resolved server-side from gameId.
   getLeaderboard(args: {
     gameId: string;
-    period: 'daily' | 'weekly' | 'alltime';
     limit?: number;
     cursor?: string;
   }): Promise<LeaderboardResponse> {
     return this.http.call<LeaderboardResponse>('game/get_leaderboard', {
       gameId: args.gameId,
-      period: args.period,
       limit: args.limit ?? 20,
       cursor: args.cursor ?? '',
     });
+  }
+
+  // A player's Glicko-2 rating for a game (rating, deviation, provisional/ranked,
+  // peak, leaderboard rank). Defaults to the current user.
+  getRating(gameId: string): Promise<RatingResponse> {
+    return this.http.call<RatingResponse>('game/get_rating', { gameId });
   }
 
   getRules(gameId: string): Promise<RulesResponse> {
@@ -150,7 +169,7 @@ export class GameApi {
   }
 
   getPlayerStats(gameId: string): Promise<PlayerStatsResponse> {
-    return this.http.call<PlayerStatsResponse>('game/get_player_stats', {
+    return this.http.call<PlayerStatsResponse>('game/get_stats', {
       gameId,
     });
   }

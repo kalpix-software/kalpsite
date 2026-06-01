@@ -49,6 +49,7 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
   const [stateAt, setStateAt] = useState<number>(() => Date.now());
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [confirmResign, setConfirmResign] = useState(false);
   const [pendingPromo, setPendingPromo] = useState<PendingPromotion | null>(null);
   const [debug, setDebug] = useState<DebugInfo>({
     step: 'mounting',
@@ -366,9 +367,7 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
         <div className="flex gap-2">
           <ActionButton
             disabled={!interactive}
-            onClick={() => {
-              if (confirm('Resign this game?')) sendResign();
-            }}
+            onClick={() => setConfirmResign(true)}
           >
             Resign
           </ActionButton>
@@ -406,6 +405,34 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
         <div className="pointer-events-none fixed inset-x-0 top-16 flex justify-center">
           <div className="rounded-md bg-black/80 px-4 py-2 text-sm shadow-lg">
             {toast}
+          </div>
+        </div>
+      )}
+
+      {/* In-app confirm — window.confirm() is unreliable inside the app's
+          webview (native JS dialogs are often suppressed), so we use a modal. */}
+      {confirmResign && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6">
+          <div className="w-full max-w-xs rounded-2xl bg-zinc-900 p-5 text-center shadow-xl">
+            <div className="text-base font-semibold text-white">Resign this game?</div>
+            <div className="mt-1 text-sm text-white/50">This counts as a loss.</div>
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => setConfirmResign(false)}
+                className="flex-1 rounded-lg bg-white/10 py-2.5 text-sm font-semibold text-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setConfirmResign(false);
+                  sendResign();
+                }}
+                className="flex-1 rounded-lg bg-red-500 py-2.5 text-sm font-semibold text-white"
+              >
+                Resign
+              </button>
+            </div>
           </div>
         </div>
       )}

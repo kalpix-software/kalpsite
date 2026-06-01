@@ -10,6 +10,7 @@ import {
   type ActiveMatchSummary,
   type GameCatalogItem,
   type PlayerStatsResponse,
+  type RatingResponse,
 } from '@/lib/kalpix-web-sdk/games';
 import { lobbyTheme } from '@/components/games/shell/theme';
 
@@ -52,6 +53,7 @@ export default function ChessLobbyClient() {
 
   const [catalogItem, setCatalogItem] = useState<GameCatalogItem | null>(null);
   const [stats, setStats] = useState<PlayerStatsResponse>(DEFAULT_STATS);
+  const [ratingInfo, setRatingInfo] = useState<RatingResponse | null>(null);
   const [activeMatches, setActiveMatches] = useState<ActiveMatchSummary[]>([]);
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -88,10 +90,11 @@ export default function ChessLobbyClient() {
       });
 
       // 3. Fan out the lobby's data fetches.
-      const [catalogR, statsR, activeR] = await Promise.allSettled([
+      const [catalogR, statsR, activeR, ratingR] = await Promise.allSettled([
         games.getCatalog(),
         games.getPlayerStats('chess').catch(() => DEFAULT_STATS),
         games.getActiveMatch('chess').catch(() => ({ active: false, matches: [] })),
+        games.getRating('chess').catch(() => null),
       ]);
       if (cancelled) return;
       if (catalogR.status === 'fulfilled') {
@@ -102,6 +105,7 @@ export default function ChessLobbyClient() {
       }
       if (statsR.status === 'fulfilled') setStats(statsR.value ?? DEFAULT_STATS);
       if (activeR.status === 'fulfilled') setActiveMatches(activeR.value.matches ?? []);
+      if (ratingR.status === 'fulfilled' && ratingR.value) setRatingInfo(ratingR.value);
     })();
 
     return () => {
@@ -123,15 +127,17 @@ export default function ChessLobbyClient() {
     return fromCatalog.length > 0 ? fromCatalog : undefined!;
   }, [catalogItem]);
 
-  const rating = useMemo<number>(() => {
-    const gs = stats.gameSpecific as { rating?: number } | undefined;
-    return gs?.rating ?? 1200;
-  }, [stats]);
+  // Rating comes from the Glicko-2 endpoint (game/get_rating), not the stats
+  // blob. Defaults to the starting rating until the player has a result.
+  const rating = useMemo<number>(
+    () => (ratingInfo ? Math.round(ratingInfo.rating) : 1500),
+    [ratingInfo],
+  );
 
-  const peakRating = useMemo<number>(() => {
-    const gs = stats.gameSpecific as { peakRating?: number } | undefined;
-    return gs?.peakRating ?? rating;
-  }, [stats, rating]);
+  const peakRating = useMemo<number>(
+    () => (ratingInfo ? Math.round(ratingInfo.peakRating) : rating),
+    [ratingInfo, rating],
+  );
 
   const startMatchmaking = useCallback((q: QueueMode) => {
     setMmTimeControl(q.key);
@@ -230,6 +236,7 @@ export default function ChessLobbyClient() {
           games={games}
           timeControl={mmTimeControl}
           rating={rating}
+          provisional={ratingInfo?.provisional ?? true}
           onClose={() => setMmTimeControl(null)}
           onMatchReady={onMatchReady}
         />
