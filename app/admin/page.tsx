@@ -48,7 +48,7 @@ export default function AdminDashboardPage() {
         </div>
         <div className="p-4 rounded-xl bg-gradient-to-br from-emerald-600/20 to-emerald-900/20 border border-emerald-500/30">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-emerald-300 mb-1">Game Upgrades</h3>
-          <p className="text-sm text-slate-400">UNO card backs, card faces, backgrounds, emotes, win effects</p>
+          <p className="text-sm text-slate-400">Tero card decks, backgrounds, emotes, win effects</p>
         </div>
         <div className="p-4 rounded-xl bg-gradient-to-br from-purple-600/20 to-purple-900/20 border border-purple-500/30">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-purple-300 mb-1">Chat Upgrades</h3>

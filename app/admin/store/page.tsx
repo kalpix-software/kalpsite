@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { callAdminRpc, unwrapAdminRpcData } from '@/lib/admin-rpc';
+import DeckVariantUploader from '@/components/admin/DeckVariantUploader';
 
 interface StoreItem {
   itemId: string;
@@ -38,13 +39,18 @@ const UPGRADE_TYPES = [
 const PAGE_SIZES = [20, 50, 100, 200, 500] as const;
 
 const KNOWN_GAMES: { value: string; label: string }[] = [
-  { value: 'uno', label: 'Uno' },
+  { value: 'tero', label: 'Tero' },
   { value: 'chess', label: 'Chess' },
   { value: 'ludo', label: 'Ludo' },
 ];
 
+// SUBCATEGORIES_BY_GAME drives the Subcategory dropdown in the Add-item
+// form. Snake-case key is what gets stored on the store item; admins
+// can still type a brand-new subcategory via the "Other" option, so this
+// list is a convenience, not a hard whitelist. Extend it as new shop
+// tabs are designed (e.g. tero "effects", "card_back_alt", ...).
 const SUBCATEGORIES_BY_GAME: Record<string, string[]> = {
-  uno: ['card_decks', 'card_back', 'background', 'background_themes', 'effects'],
+  tero: ['card_decks', 'background'],
   chess: ['board_themes', 'piece_sets'],
   ludo: ['board_themes', 'dice_themes', 'token_themes'],
 };
@@ -165,10 +171,14 @@ function AddItemForm({
   const [error, setError] = useState('');
   const [form, setForm] = useState({
     upgradeType: 'game_upgrade' as string,
-    category: 'uno',
+    category: 'tero',
     categoryCustom: '',
     subcategory: 'card_decks',
     subcategoryCustom: '',
+    // variant is the cosmetic theme tag (anime/noir/space) the FE uses to
+    // group items under shop sections. Lands at store_items.metadata.variant.
+    // Required for tero card_decks + background; ignored for other types.
+    variant: '',
     name: '',
     description: '',
     previewUrl: '',
@@ -199,6 +209,18 @@ function AddItemForm({
             : form.category;
       const subcategory = form.subcategory === '__other__' ? form.subcategoryCustom.trim() : (form.subcategoryCustom.trim() || form.subcategory);
       const itemId = generateId();
+      const metadata: Record<string, string> = {
+        purchaseLimit: String(form.purchaseLimit),
+      };
+      // Stamp variant onto metadata when the admin filled it in. The FE
+      // reads metadata.variant to group items into shop sections (Anime /
+      // Noir / Space). Server-side, the tero match handler reads it via
+      // store_items.metadata->>'variant' to resolve CardDeckVariant at
+      // MatchJoinAttempt.
+      const variantSlug = form.variant.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+      if (variantSlug) {
+        metadata.variant = variantSlug;
+      }
       const item: Record<string, unknown> = {
         itemId,
         name: form.name,
@@ -213,9 +235,7 @@ function AddItemForm({
         stock: -1,
         discountedPriceCoins: form.discountedPriceCoins,
         discountedPriceGems: form.discountedPriceGems,
-        metadata: {
-          purchaseLimit: String(form.purchaseLimit),
-        },
+        metadata,
       };
       if (form.upgradeType === 'avatar_upgrade') item.avatarId = category;
       if (form.upgradeType === 'game_upgrade') item.gameId = category;
@@ -223,10 +243,11 @@ function AddItemForm({
       setOpen(false);
       setForm({
         upgradeType: 'game_upgrade',
-        category: 'uno',
+        category: 'tero',
         categoryCustom: '',
         subcategory: 'card_decks',
         subcategoryCustom: '',
+        variant: '',
         name: '',
         description: '',
         previewUrl: '',
@@ -271,7 +292,7 @@ function AddItemForm({
               setForm((f) => ({
                 ...f,
                 upgradeType: e.target.value,
-                category: e.target.value === 'game_upgrade' ? 'uno' : e.target.value === 'chat_upgrade' ? 'chat_bubbles' : '',
+                category: e.target.value === 'game_upgrade' ? 'tero' : e.target.value === 'chat_upgrade' ? 'chat_bubbles' : '',
                 subcategory: '',
                 categoryCustom: '',
                 subcategoryCustom: '',
@@ -377,6 +398,37 @@ function AddItemForm({
                 />
               )}
             </div>
+            {/* Variant picker — shown for cosmetic-theme subcategories.
+                Stamped onto metadata.variant on save. The FE reads
+                metadata.variant to group items in the shop UI; the
+                backend reads it to resolve TeroPlayer.cardDeckVariant
+                at match join time. */}
+            {(form.subcategory === 'card_decks' || form.subcategory === 'background') && (
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">
+                  Variant <span className="text-slate-500">(theme — groups items in shop)</span>
+                </label>
+                <select
+                  value={form.variant || ''}
+                  onChange={(e) => setForm((f) => ({ ...f, variant: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm"
+                >
+                  <option value="">(none — no shop grouping)</option>
+                  <option value="anime">anime</option>
+                  <option value="noir">noir</option>
+                  <option value="space">space</option>
+                  <option value="__other__">Other (type below)</option>
+                </select>
+                {form.variant === '__other__' && (
+                  <input
+                    value={form.variant === '__other__' ? '' : form.variant}
+                    onChange={(e) => setForm((f) => ({ ...f, variant: e.target.value }))}
+                    placeholder="e.g. retro, neon"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm mt-1"
+                  />
+                )}
+              </div>
+            )}
           </>
         )}
 
@@ -609,7 +661,10 @@ export default function AdminStorePage() {
             Add, edit, or remove items. Avatar items are created when you sync a catalog on the Avatars page. Here you manage game and chat items and prices.
           </p>
         </div>
-        <AddItemForm onAdded={loadItems} existingGames={existingGames} existingAvatars={existingAvatars} />
+        <div className="flex flex-wrap gap-2">
+          <AddItemForm onAdded={loadItems} existingGames={existingGames} existingAvatars={existingAvatars} />
+          <DeckVariantUploader onUploaded={loadItems} />
+        </div>
       </div>
 
       <div className="mb-4 flex flex-wrap gap-2 items-center">
@@ -629,7 +684,7 @@ export default function AdminStorePage() {
         </select>
         <input
           type="text"
-          placeholder="Game or category (e.g. uno, avatar1)"
+          placeholder="Game or category (e.g. tero, avatar1)"
           value={filter.category}
           onChange={(e) => {
             setFilter((f) => ({ ...f, category: e.target.value }));

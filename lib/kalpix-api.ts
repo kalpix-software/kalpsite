@@ -86,12 +86,23 @@ export async function loginWithGameAuth(email: string, password: string): Promis
     deviceId: 'kalpsite-admin',
     platform: 'web',
     deviceName: 'Kalpsite Admin',
-  })) as { sessionToken?: string; isAdmin?: boolean; profile?: { isAdmin?: boolean } };
+  })) as {
+    sessionToken?: string;
+    isAdmin?: boolean;
+    profile?: { isAdmin?: boolean; metadata?: { isAdmin?: boolean } };
+  };
   const token = typeof data?.sessionToken === 'string' ? data.sessionToken.trim() : '';
   if (!token) {
     throw new Error('Game server did not return a session token');
   }
-  const isAdmin = data?.isAdmin === true || data?.profile?.isAdmin === true;
+  // Admin flag lives at profile.metadata.isAdmin in the live backend
+  // response. Older code paths may surface it at the top level or at
+  // profile.isAdmin — accept any of those so this stays robust if the
+  // backend ever flattens the shape.
+  const isAdmin =
+    data?.isAdmin === true ||
+    data?.profile?.isAdmin === true ||
+    data?.profile?.metadata?.isAdmin === true;
   return { token, isAdmin };
 }
 

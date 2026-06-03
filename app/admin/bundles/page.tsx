@@ -82,7 +82,7 @@ function AddBundleForm({ onAdded }: { onAdded: () => void }) {
         <input value={form.coins} onChange={e => setForm(f => ({ ...f, coins: parseInt(e.target.value) || 0 }))} type="number" placeholder="Bundle Price (Coins)" className="px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm" />
         <input value={form.gems} onChange={e => setForm(f => ({ ...f, gems: parseInt(e.target.value) || 0 }))} type="number" placeholder="Bundle Price (Gems)" className="px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm" />
       </div>
-      <input value={form.itemIdsRaw} onChange={e => setForm(f => ({ ...f, itemIdsRaw: e.target.value }))} placeholder="Item IDs (comma-separated, e.g. uno_card_back_gold,uno_bg_midnight)" className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm" />
+      <input value={form.itemIdsRaw} onChange={e => setForm(f => ({ ...f, itemIdsRaw: e.target.value }))} placeholder="Item IDs (comma-separated, e.g. tero_card_decks_anime,tero_background_noir)" className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm" />
       <input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Description" className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm" />
       {error && <p className="text-sm text-red-400">{error}</p>}
       <div className="flex gap-2">

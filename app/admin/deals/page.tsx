@@ -127,7 +127,7 @@ export default function AdminDealsPage() {
             <input
               value={formItemId}
               onChange={(e) => setFormItemId(e.target.value)}
-              placeholder="e.g. uno_card_back_gold"
+              placeholder="e.g. tero_card_decks_anime"
               className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-sm text-slate-100 placeholder:text-slate-600"
             />
           </div>
