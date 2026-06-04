@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { callAdminRpc, unwrapAdminRpcData } from '@/lib/admin-rpc';
 import DeckVariantUploader from '@/components/admin/DeckVariantUploader';
+import VideoBackgroundUploader from '@/components/admin/VideoBackgroundUploader';
 
 interface StoreItem {
   itemId: string;
@@ -664,6 +665,7 @@ export default function AdminStorePage() {
         <div className="flex flex-wrap gap-2">
           <AddItemForm onAdded={loadItems} existingGames={existingGames} existingAvatars={existingAvatars} />
           <DeckVariantUploader onUploaded={loadItems} />
+          <VideoBackgroundUploader onUploaded={loadItems} />
         </div>
       </div>
 
