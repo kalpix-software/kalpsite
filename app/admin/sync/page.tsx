@@ -6,6 +6,14 @@ import { callAdminRpc, unwrapAdminRpcData } from '@/lib/admin-rpc';
 
 const callRpc = callAdminRpc;
 
+// Public base for R2-hosted assets (custom domain in front of the bucket).
+const R2_PUBLIC_BASE_URL = 'https://assets.kalpixsoftware.com';
+
+// Local dev: skip re-uploading spine assets to R2. The objects already live on the
+// shared R2 bucket from a previous upload, so a fresh local DB only needs to point at
+// them — not push them again. Set NEXT_PUBLIC_SKIP_R2_UPLOAD=true in .env to enable.
+const SKIP_R2_SPINE_UPLOAD = process.env.NEXT_PUBLIC_SKIP_R2_UPLOAD === 'true';
+
 // ─── Types ───
 
 type AvatarListItem = {
@@ -336,6 +344,13 @@ function contentTypeForFile(file: File): string {
 async function uploadFileToR2(file: File, itemType: string, category: string, fileName?: string, subcategory?: string): Promise<string> {
   const contentType = contentTypeForFile(file);
 
+  // Local dev bypass: spine assets already exist on the shared R2 bucket. Skip the presign
+  // RPC and the browser PUT entirely so a fresh local DB needs no R2 access, and just return
+  // the deterministic public URL (backend key pattern: avatars/{slug}/spine/{fileName}).
+  if (SKIP_R2_SPINE_UPLOAD && itemType === 'avatar_spine') {
+    return `${R2_PUBLIC_BASE_URL}/avatars/${category}/spine/${fileName ?? file.name}`;
+  }
+
   // Step 1: Get presigned URL from backend
   const rpcPayload = JSON.stringify({
     itemType,
@@ -488,7 +503,7 @@ export default function AdminAvatarsPage() {
     }
   };
 
-  const R2_PUBLIC_BASE = 'https://assets.kalpixsoftware.com';
+  const R2_PUBLIC_BASE = R2_PUBLIC_BASE_URL;
 
   async function headOk(url: string): Promise<boolean> {
     try {
@@ -620,7 +635,8 @@ export default function AdminAvatarsPage() {
       // Clear any previous price table until assignments are confirmed
       setParsed(null);
       setPriceRows([]);
-      setUploadStatus({ result: `Spine assets uploaded to R2. ${categories.reduce((n, c) => n + c.subcategories.reduce((m, sub) => m + sub.options.length, 0), 0)} options found. Review category assignments below, then confirm to set prices.` });
+      const uploadVerb = SKIP_R2_SPINE_UPLOAD ? 'reused from R2 (upload skipped — local mode)' : 'uploaded to R2';
+      setUploadStatus({ result: `Spine assets ${uploadVerb}. ${categories.reduce((n, c) => n + c.subcategories.reduce((m, sub) => m + sub.options.length, 0), 0)} options found. Review category assignments below, then confirm to set prices.` });
     } catch (e) {
       setUploadStatus({ error: e instanceof Error ? e.message : 'Upload failed' });
     } finally {
