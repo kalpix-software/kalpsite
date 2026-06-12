@@ -28,13 +28,13 @@ export const APPS: Record<string, AppConfig> = {
   'plazy.kalpixsoftware.com': {
     name: 'Plazy',
     // ── FILL THESE 4 IN ──────────────────────────────────────────────
-    androidPackage: 'com.kalpixsoftware.plazy', // e.g. com.kalpix.plazy
+    androidPackage: 'com.kalpixgames.plazy', // e.g. com.kalpix.plazy
     androidFingerprints: ["69:CD:2A:C1:18:2B:8E:00:C7:11:ED:81:CE:2D:36:98:08:AE:A7:FF:DC:5E:10:17:8E:49:55:5B:AB:AF:14:46",
         "60:8D:1E:8A:EC:9D:A4:C6:E9:34:65:E6:01:09:B2:08:96:03:47:94:61:82:AF:A9:27:6F:B9:C7:26:3A:1C:47"], // Play Console > App signing
     iosAppId: 'REPLACE_ME_TEAMID.REPLACE_ME.bundle.id', // e.g. ABCDE12345.com.kalpix.plazy
     appStoreUrl: 'https://apps.apple.com/app/idREPLACE_ME', // App Store listing
     // ─────────────────────────────────────────────────────────────────
-    playUrl: 'https://play.google.com/store/apps/details?id=com.kalpixsoftware.plazy',
+    playUrl: 'https://play.google.com/store/apps/details?id=com.kalpixgames.plazy',
     apiBase: 'https://api.kalpixsoftware.com',
   },
 
