@@ -73,7 +73,7 @@ export default function MatchmakingDialog(p: MatchmakingDialogProps) {
             setPhase('fallback');
             const { matchId } = await p.games.findOrCreateChessMatch({
               timeControl: p.timeControl,
-              rated: false,
+              rated: true, // bot matches are rated — the bot counts as a real opponent
               allowBot: true,
             });
             await p.games.addBotToChessMatch({
