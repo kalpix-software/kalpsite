@@ -26,7 +26,7 @@ const allowedContentTypes: Record<string, string> = {
 };
 
 const allowedItemTypes = new Set([
-  'avatar_spine', 'avatar_preview', 'avatar_thumbnail', 'game_item', 'chat_item',
+  'avatar_spine', 'avatar_preview', 'avatar_thumbnail', 'game_item', 'chat_item', 'card_deck',
 ]);
 
 function sanitize(s: string) {
@@ -55,6 +55,14 @@ function buildKey(itemType: string, category: string, subcategory: string, fileN
       return `games/${cat}/items/${sub}/${Date.now()}${ext}`;
     case 'chat_item':
       return `chat/items/${sub}/${Date.now()}${ext}`;
+    case 'card_deck':
+      // Tero card-deck sprite atlas. category = variant slug (e.g. "space").
+      // Deterministic names so the backend builds the URL from the slug alone:
+      //   .txt  -> {variant}.atlas.txt   (per-card bounds)
+      //   .webp -> {variant}.webp        (sprite sheet)
+      return ext === '.txt'
+        ? `games/tero/card_decks/${cat}/${cat}.atlas.txt`
+        : `games/tero/card_decks/${cat}/${cat}.webp`;
     default:
       return `uploads/${Date.now()}${ext}`;
   }
@@ -97,6 +105,9 @@ export async function POST(req: NextRequest) {
     }
     if (itemType === 'avatar_spine' && !fileName) {
       return NextResponse.json({ error: 'fileName required for avatar_spine' }, { status: 400, headers: NO_STORE });
+    }
+    if (itemType === 'card_deck' && !category) {
+      return NextResponse.json({ error: 'category (variant slug) required for card_deck' }, { status: 400, headers: NO_STORE });
     }
     if (!(fileEntry instanceof Blob)) {
       return NextResponse.json({ error: 'file field required' }, { status: 400, headers: NO_STORE });
