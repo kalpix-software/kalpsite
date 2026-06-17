@@ -26,7 +26,7 @@ const allowedContentTypes: Record<string, string> = {
 };
 
 const allowedItemTypes = new Set([
-  'avatar_spine', 'avatar_preview', 'avatar_thumbnail', 'game_item', 'chat_item', 'card_deck',
+  'avatar_spine', 'avatar_preview', 'avatar_thumbnail', 'avatar_background', 'game_item', 'chat_item', 'card_deck',
 ]);
 
 function sanitize(s: string) {
@@ -50,6 +50,13 @@ function buildKey(itemType: string, category: string, subcategory: string, fileN
       const low = fn.toLowerCase();
       const base = low.endsWith(ext) ? fn : fn.replace(/\.[^.]+$/, '') + ext;
       return `avatars/${cat}/previews/${sub}/${base}`;
+    }
+    case 'avatar_background': {
+      // Full-res background image (not spine-driven). Deterministic name (e.g. bg_1.webp) so it matches the catalog assetUrl.
+      if (!fn) return `avatars/${cat}/backgrounds/${sub}/${Date.now()}${ext}`;
+      const low = fn.toLowerCase();
+      const base = low.endsWith(ext) ? fn : fn.replace(/\.[^.]+$/, '') + ext;
+      return `avatars/${cat}/backgrounds/${sub}/${base}`;
     }
     case 'game_item':
       return `games/${cat}/items/${sub}/${Date.now()}${ext}`;
