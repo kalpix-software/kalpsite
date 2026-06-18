@@ -9,10 +9,10 @@ export interface LobbyHeaderProps {
   bannerUrl?: string;
   rating: number;
   peakRating: number;
-  wins: number;
-  losses: number;
-  draws: number;
-  totalMatches: number;
+  gamesWon: number;
+  gamesLost: number;
+  gamesDrawn: number;
+  gamesPlayed: number;
   rankLabel: string; // e.g. "Silver", "Gold", "Master"
   rankProgress: number; // 0..1 within current rank
 }
@@ -48,8 +48,8 @@ export default function LobbyHeader(p: LobbyHeaderProps) {
       <div className="absolute left-5 right-5 top-5 flex items-center justify-between text-white">
         <div className="text-2xl font-semibold tracking-wide">{p.title}</div>
         <div className="text-xs text-white/60">
-          {p.totalMatches} games · {p.wins}W / {p.losses}L
-          {p.draws > 0 && ` / ${p.draws}D`}
+          {p.gamesPlayed} games · {p.gamesWon}W / {p.gamesLost}L
+          {p.gamesDrawn > 0 && ` / ${p.gamesDrawn}D`}
         </div>
       </div>
 

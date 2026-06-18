@@ -9,7 +9,7 @@ import {
   GameApi,
   type ActiveMatchSummary,
   type GameCatalogItem,
-  type PlayerStatsResponse,
+  type GameStatsResponse,
   type RatingResponse,
 } from '@/lib/kalpix-web-sdk/games';
 import { lobbyTheme } from '@/components/games/shell/theme';
@@ -27,23 +27,21 @@ import ActiveMatchBar from './ActiveMatchBar';
 // Host is resolved at runtime (URL query → sessionStorage → env) so the
 // same kalpsite build serves both real-device and emulator from one server.
 
-const DEFAULT_STATS: PlayerStatsResponse = {
-  userId: '',
+const DEFAULT_STATS: GameStatsResponse = {
   gameId: 'chess',
-  totalMatches: 0,
-  wins: 0,
-  losses: 0,
-  draws: 0,
+  name: 'Chess',
+  iconUrl: '',
+  level: 1,
+  zone: 'Onboarding',
+  totalXp: 0,
+  xpIntoLevel: 0,
+  xpForNextLevel: 100,
+  isMaxLevel: false,
+  gamesPlayed: 0,
+  gamesWon: 0,
+  gamesLost: 0,
+  gamesDrawn: 0,
   winRate: 0,
-  totalScore: 0,
-  highestScore: 0,
-  currentStreak: 0,
-  longestWinStreak: 0,
-  rank: 0,
-  lastPlayedAt: 0,
-  createdAt: 0,
-  updatedAt: 0,
-  gameSpecific: { rating: 1200, peakRating: 1200 },
 };
 
 export default function ChessLobbyClient() {
@@ -52,7 +50,7 @@ export default function ChessLobbyClient() {
   const [bootError, setBootError] = useState<string | null>(null);
 
   const [catalogItem, setCatalogItem] = useState<GameCatalogItem | null>(null);
-  const [stats, setStats] = useState<PlayerStatsResponse>(DEFAULT_STATS);
+  const [stats, setStats] = useState<GameStatsResponse>(DEFAULT_STATS);
   const [ratingInfo, setRatingInfo] = useState<RatingResponse | null>(null);
   const [activeMatches, setActiveMatches] = useState<ActiveMatchSummary[]>([]);
 
@@ -92,7 +90,7 @@ export default function ChessLobbyClient() {
       // 3. Fan out the lobby's data fetches.
       const [catalogR, statsR, activeR, ratingR] = await Promise.allSettled([
         games.getCatalog(),
-        games.getPlayerStats('chess').catch(() => DEFAULT_STATS),
+        games.getStats('chess').catch(() => DEFAULT_STATS),
         games.getActiveMatch('chess').catch(() => ({ active: false, matches: [] })),
         games.getRating('chess').catch(() => null),
       ]);
@@ -193,10 +191,10 @@ export default function ChessLobbyClient() {
           bannerUrl={catalogItem?.bannerUrl}
           rating={rating}
           peakRating={peakRating}
-          wins={stats.wins}
-          losses={stats.losses}
-          draws={stats.draws}
-          totalMatches={stats.totalMatches}
+          gamesWon={stats.gamesWon}
+          gamesLost={stats.gamesLost}
+          gamesDrawn={stats.gamesDrawn}
+          gamesPlayed={stats.gamesPlayed}
           rankLabel={ratingTitle(rating)}
           rankProgress={ratingProgress(rating)}
         />

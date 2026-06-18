@@ -17,6 +17,7 @@ import {
   type ChessSide,
   type ChessStateWire,
 } from '@/lib/kalpix-web-sdk/chess';
+import { useNativeBack } from '@/hooks/useNativeBack';
 
 import Board from './Board';
 import Clock from './Clock';
@@ -45,6 +46,14 @@ interface DebugInfo {
 
 export default function ChessMatchClient({ matchId }: { matchId: string }) {
   const router = useRouter();
+
+  // Native back button (Plazy webview host): step back to the lobby within the
+  // SPA instead of leaving the webview. Returning true keeps the host on this
+  // route; the SPA push gives an instant, reliable transition (no full reload).
+  useNativeBack(() => {
+    router.push('/games/chess/lobby');
+    return true;
+  });
   const [state, setState] = useState<ChessStateWire | null>(null);
   const [stateAt, setStateAt] = useState<number>(() => Date.now());
   const [error, setError] = useState<string | null>(null);

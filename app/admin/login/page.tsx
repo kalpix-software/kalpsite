@@ -1,11 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 export default function AdminLoginPage() {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -32,9 +30,11 @@ export default function AdminLoginPage() {
         setError(data.error || "Login failed");
         return;
       }
-      // Login succeeded and cookie is set by the response – go to admin
-      router.push("/admin");
-      router.refresh();
+      // Login succeeded and the session cookie is set by the response. Use a
+      // full-page navigation (not router.push) so the browser sends the freshly
+      // set cookie on the next request — a client-side push races the cookie
+      // write and the layout's session check bounces back to /admin/login.
+      window.location.assign("/admin");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Login failed");
     } finally {

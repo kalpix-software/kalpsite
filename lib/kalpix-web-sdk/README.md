@@ -32,7 +32,7 @@ const client = new KalpixClient({
 await client.connect();
 
 const games = new GameApi(client.http);
-const stats = await games.getPlayerStats('chess');
+const stats = await games.getStats('chess');
 
 const handle = findMatch(client.socket, {
   minCount: 2,

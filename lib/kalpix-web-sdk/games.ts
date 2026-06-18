@@ -102,23 +102,23 @@ export interface RulesResponse {
   quickTips: string[];
 }
 
-export interface PlayerStatsResponse {
-  userId: string;
+// Unified per-game stats from game/get_stats (single game). Mirrors the
+// backend models.GameStats: level/XP progression + the match record.
+export interface GameStatsResponse {
   gameId: string;
-  totalMatches: number;
-  wins: number;
-  losses: number;
-  draws: number;
+  name: string;
+  iconUrl: string;
+  level: number;
+  zone: string;
+  totalXp: number;
+  xpIntoLevel: number;
+  xpForNextLevel: number;
+  isMaxLevel: boolean;
+  gamesPlayed: number;
+  gamesWon: number;
+  gamesLost: number;
+  gamesDrawn: number;
   winRate: number;
-  totalScore: number;
-  highestScore: number;
-  currentStreak: number;
-  longestWinStreak: number;
-  rank: number;
-  lastPlayedAt: number;
-  createdAt: number;
-  updatedAt: number;
-  gameSpecific: Record<string, unknown>;
 }
 
 export interface StoreItem {
@@ -168,8 +168,8 @@ export class GameApi {
     return this.http.call<RulesResponse>('game/get_rules', { gameId });
   }
 
-  getPlayerStats(gameId: string): Promise<PlayerStatsResponse> {
-    return this.http.call<PlayerStatsResponse>('game/get_stats', {
+  getStats(gameId: string): Promise<GameStatsResponse> {
+    return this.http.call<GameStatsResponse>('game/get_stats', {
       gameId,
     });
   }

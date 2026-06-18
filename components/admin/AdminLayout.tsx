@@ -11,8 +11,6 @@ import {
 } from 'lucide-react';
 
 const SESSION_URL = '/api/auth/session';
-const SESSION_RETRY_MS = 350;
-const SESSION_RETRY_MS_SECOND = 500;
 
 function useSession(enable: boolean) {
   const [auth, setAuth] = useState<boolean | null>(enable ? null : true);
@@ -20,42 +18,17 @@ function useSession(enable: boolean) {
   useEffect(() => {
     if (!enable) return;
 
-    const check = (): Promise<boolean> =>
-      fetch(SESSION_URL, { credentials: 'include', cache: 'no-store' })
-        .then((r) => r.json())
-        .then((d) => d.authenticated === true)
-        .catch(() => false);
-
     let cancelled = false;
-    let timeout1: ReturnType<typeof setTimeout> | undefined;
-    let timeout2: ReturnType<typeof setTimeout> | undefined;
-
-    check().then((ok) => {
-      if (cancelled) return;
-      if (ok) {
-        setAuth(true);
-        return;
-      }
-      timeout1 = setTimeout(() => {
-        check().then((ok2) => {
-          if (cancelled) return;
-          if (ok2) {
-            setAuth(true);
-            return;
-          }
-          timeout2 = setTimeout(() => {
-            check().then((ok3) => {
-              if (!cancelled) setAuth(ok3);
-            });
-          }, SESSION_RETRY_MS_SECOND);
-        });
-      }, SESSION_RETRY_MS);
-    });
+    fetch(SESSION_URL, { credentials: 'include', cache: 'no-store' })
+      .then((r) => r.json())
+      .then((d) => d.authenticated === true)
+      .catch(() => false)
+      .then((ok) => {
+        if (!cancelled) setAuth(ok);
+      });
 
     return () => {
       cancelled = true;
-      if (timeout1) clearTimeout(timeout1);
-      if (timeout2) clearTimeout(timeout2);
     };
   }, [enable]);
 
