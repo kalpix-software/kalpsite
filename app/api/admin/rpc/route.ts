@@ -58,6 +58,8 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   'store/admin_delete_bundle',
   'avatar/admin_list_avatars',
   'avatar/admin_set_avatar_active',
+  'avatar/admin_set_avatar_assignable',
+  'avatar/admin_set_default_option',
   'avatar/admin_set_option_preview',
   'avatar/sync_avatars',
   'avatar/get_character_catalog',

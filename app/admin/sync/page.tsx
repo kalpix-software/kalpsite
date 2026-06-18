@@ -22,6 +22,7 @@ type AvatarListItem = {
   avatarName: string;
   previewUrl?: string;
   isActive: boolean;
+  randomlyAssignable?: boolean;
   sortOrder?: number;
 };
 
@@ -587,6 +588,19 @@ export default function AdminAvatarsPage() {
     }
   };
 
+  // Toggle whether this avatar is eligible for new-user random assignment (independent of Active).
+  const setAvatarAssignable = async (avatarId: string, randomlyAssignable: boolean) => {
+    setTogglingId(avatarId);
+    try {
+      await callRpc('avatar/admin_set_avatar_assignable', JSON.stringify({ avatarId, randomlyAssignable }));
+      setListAvatars((prev) => prev.map((a) => (a.avatarId === avatarId ? { ...a, randomlyAssignable } : a)));
+    } catch {
+      setListError('Failed to update random-pool state');
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
   // ─── Spine file upload + auto-parse ───
 
   const handleSpineUploadAndParse = async () => {
@@ -975,11 +989,12 @@ export default function AdminAvatarsPage() {
                       <th className="text-left px-3 py-2">Slug</th>
                       <th className="text-left px-3 py-2">Name</th>
                       <th className="text-left px-3 py-2 w-24">Active</th>
+                      <th className="text-left px-3 py-2 w-32" title="Eligible for new-user random assignment (independent of Active)">Random pool</th>
                     </tr>
                   </thead>
                   <tbody className="text-slate-300">
                     {listAvatars.length === 0 ? (
-                      <tr><td colSpan={3} className="px-3 py-4 text-slate-500 text-center">No avatars in database. Upload Spine assets below.</td></tr>
+                      <tr><td colSpan={4} className="px-3 py-4 text-slate-500 text-center">No avatars in database. Upload Spine assets below.</td></tr>
                     ) : (
                       listAvatars.map((a) => (
                         <tr key={a.avatarId} className="border-t border-slate-600 hover:bg-slate-800/50">
@@ -989,6 +1004,12 @@ export default function AdminAvatarsPage() {
                             <label className="flex items-center gap-2 cursor-pointer">
                               <input type="checkbox" checked={a.isActive} disabled={togglingId === a.avatarId} onChange={(e) => setAvatarActive(a.avatarId, e.target.checked)} className="rounded border-slate-600 bg-slate-900 text-indigo-600 focus:ring-indigo-500" />
                               <span className={a.isActive ? 'text-green-400' : 'text-slate-500'}>{togglingId === a.avatarId ? '...' : a.isActive ? 'Yes' : 'No'}</span>
+                            </label>
+                          </td>
+                          <td className="px-3 py-2">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input type="checkbox" checked={a.randomlyAssignable ?? true} disabled={togglingId === a.avatarId} onChange={(e) => setAvatarAssignable(a.avatarId, e.target.checked)} className="rounded border-slate-600 bg-slate-900 text-indigo-600 focus:ring-indigo-500" />
+                              <span className={(a.randomlyAssignable ?? true) ? 'text-green-400' : 'text-slate-500'}>{togglingId === a.avatarId ? '...' : (a.randomlyAssignable ?? true) ? 'Yes' : 'No'}</span>
                             </label>
                           </td>
                         </tr>
