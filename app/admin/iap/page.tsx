@@ -1,7 +1,98 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { callAdminRpc } from '@/lib/admin-rpc';
+import { callAdminRpc, unwrapAdminRpcData } from '@/lib/admin-rpc';
+
+/**
+ * Upload a PNG/WebP icon to R2 via the presigned-URL flow and return its full
+ * public CDN URL. subcategory groups the object: "products" | "promos".
+ */
+async function uploadIapIcon(file: File, subcategory: string): Promise<string> {
+  const contentType = file.type; // "image/png" | "image/webp"
+  const rpc = await callAdminRpc(
+    'store/admin_get_upload_url',
+    JSON.stringify({ itemType: 'iap_icon', subcategory, contentType }),
+  );
+  const data = unwrapAdminRpcData<{ uploadUrl?: string; publicUrl?: string }>(rpc);
+  if (!data?.uploadUrl || !data?.publicUrl) throw new Error('Failed to get upload URL from backend');
+  const put = await fetch(data.uploadUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': contentType },
+    body: file,
+  });
+  if (!put.ok) throw new Error(`Upload failed (${put.status})`);
+  return data.publicUrl; // full URL
+}
+
+/** Image upload control: pick a PNG/WebP → uploads → reports the full URL. */
+function IconUpload({
+  value,
+  subcategory,
+  onUploaded,
+}: {
+  value: string;
+  subcategory: string;
+  onUploaded: (url: string) => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [err, setErr] = useState('');
+
+  const onPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file
+    if (!file) return;
+    if (file.type !== 'image/png' && file.type !== 'image/webp') {
+      setErr('Please choose a PNG or WebP image');
+      return;
+    }
+    setErr('');
+    setUploading(true);
+    try {
+      onUploaded(await uploadIapIcon(file, subcategory));
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-3">
+      {value ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={value}
+          alt="icon"
+          className="h-12 w-12 rounded-lg object-cover bg-slate-900 border border-slate-700"
+        />
+      ) : (
+        <div className="h-12 w-12 rounded-lg bg-slate-900 border border-slate-700 grid place-items-center text-[10px] text-slate-600">
+          none
+        </div>
+      )}
+      <label className="px-3 py-2 rounded-lg bg-slate-700 text-slate-200 text-xs hover:bg-slate-600 cursor-pointer">
+        {uploading ? 'Uploading…' : value ? 'Replace' : 'Upload PNG/WebP'}
+        <input
+          type="file"
+          accept="image/png,image/webp"
+          onChange={onPick}
+          disabled={uploading}
+          className="hidden"
+        />
+      </label>
+      {value && (
+        <button
+          type="button"
+          onClick={() => onUploaded('')}
+          className="text-xs text-slate-500 hover:text-slate-300"
+        >
+          Remove
+        </button>
+      )}
+      {err && <span className="text-xs text-red-400">{err}</span>}
+    </div>
+  );
+}
 
 interface IAPProduct {
   productId: string;
@@ -252,12 +343,11 @@ export default function AdminIAPPage() {
             </select>
           </div>
           <div className="sm:col-span-2">
-            <label className="block text-xs text-slate-500 mb-1">Icon URL</label>
-            <input
+            <label className="block text-xs text-slate-500 mb-1">Icon (PNG or WebP)</label>
+            <IconUpload
               value={form.iconUrl}
-              onChange={(e) => set('iconUrl', e.target.value)}
-              placeholder="/assets/iap/coins_1000.png"
-              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-sm text-slate-100 placeholder:text-slate-600"
+              subcategory="products"
+              onUploaded={(url) => set('iconUrl', url)}
             />
           </div>
           <label className="flex items-center gap-2 text-sm text-slate-300">
@@ -471,12 +561,11 @@ function PromoManager() {
           />
         </div>
         <div className="sm:col-span-2">
-          <label className="block text-xs text-slate-500 mb-1">Icon URL</label>
-          <input
+          <label className="block text-xs text-slate-500 mb-1">Icon (PNG or WebP)</label>
+          <IconUpload
             value={form.iconUrl}
-            onChange={(e) => set('iconUrl', e.target.value)}
-            placeholder="/assets/iap/promo_flame.png"
-            className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-sm text-slate-100 placeholder:text-slate-600"
+            subcategory="promos"
+            onUploaded={(url) => set('iconUrl', url)}
           />
         </div>
         <div>
