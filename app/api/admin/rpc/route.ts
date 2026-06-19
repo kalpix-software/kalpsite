@@ -58,6 +58,10 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   'store/admin_get_iap_products',
   'store/admin_upsert_iap_product',
   'store/admin_delete_iap_product',
+  // IAP promo banners – admin only
+  'store/admin_get_iap_promos',
+  'store/admin_upsert_iap_promo',
+  'store/admin_delete_iap_promo',
   'store/admin_add_bundle',
   'store/admin_delete_bundle',
   'avatar/admin_list_avatars',

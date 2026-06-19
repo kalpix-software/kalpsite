@@ -8,6 +8,7 @@ interface IAPProduct {
   name: string;
   description: string;
   coinsAmount: number;
+  bonusCoins: number;
   gemsAmount: number;
   bonusGems: number;
   price: number;
@@ -25,6 +26,7 @@ const EMPTY: IAPProduct = {
   name: '',
   description: '',
   coinsAmount: 0,
+  bonusCoins: 0,
   gemsAmount: 0,
   bonusGems: 0,
   price: 0,
@@ -138,6 +140,8 @@ export default function AdminIAPPage() {
         </button>
       </div>
 
+      <PromoManager />
+
       {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
 
       {/* Add / Edit form */}
@@ -180,6 +184,16 @@ export default function AdminIAPPage() {
               type="number"
               value={form.coinsAmount}
               onChange={(e) => set('coinsAmount', Number(e.target.value))}
+              min={0}
+              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-sm text-slate-100"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-500 mb-1">Bonus coins</label>
+            <input
+              type="number"
+              value={form.bonusCoins}
+              onChange={(e) => set('bonusCoins', Number(e.target.value))}
               min={0}
               className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-sm text-slate-100"
             />
@@ -301,6 +315,268 @@ export default function AdminIAPPage() {
   );
 }
 
+interface PromoBanner {
+  promoId: string;
+  title: string;
+  subtitle: string;
+  badgeText: string;
+  iconUrl: string;
+  isActive: boolean;
+  startsAt: number; // unix secs, 0 = no bound
+  endsAt: number;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+const EMPTY_PROMO: PromoBanner = {
+  promoId: '',
+  title: '',
+  subtitle: '',
+  badgeText: '',
+  iconUrl: '',
+  isActive: true,
+  startsAt: 0,
+  endsAt: 0,
+};
+
+// Convert unix seconds <-> the value a <input type="datetime-local"> expects (local time).
+function toLocalInput(unix: number): string {
+  if (!unix) return '';
+  const d = new Date(unix * 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function fromLocalInput(s: string): number {
+  if (!s) return 0;
+  return Math.floor(new Date(s).getTime() / 1000);
+}
+
+function promoIsLive(p: PromoBanner): boolean {
+  if (!p.isActive) return false;
+  const now = Math.floor(Date.now() / 1000);
+  if (p.startsAt > 0 && now < p.startsAt) return false;
+  if (p.endsAt > 0 && now > p.endsAt) return false;
+  return true;
+}
+
+function PromoManager() {
+  const [promos, setPromos] = useState<PromoBanner[]>([]);
+  const [form, setForm] = useState<PromoBanner>(EMPTY_PROMO);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setError('');
+    try {
+      const res = (await callAdminRpc('store/admin_get_iap_promos')) as {
+        data?: { promos?: PromoBanner[] };
+        promos?: PromoBanner[];
+      };
+      const d = res?.data ?? res;
+      setPromos(d?.promos ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load promos');
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const set = <K extends keyof PromoBanner>(key: K, value: PromoBanner[K]) =>
+    setForm((f) => ({ ...f, [key]: value }));
+
+  const reset = () => {
+    setForm(EMPTY_PROMO);
+    setEditingId(null);
+    setError('');
+  };
+
+  const save = async () => {
+    if (!form.promoId.trim() || !form.title.trim()) {
+      setError('promoId and title are required');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await callAdminRpc('store/admin_upsert_iap_promo', JSON.stringify(form));
+      reset();
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (promoId: string) => {
+    if (!confirm(`Delete promo "${promoId}"?`)) return;
+    try {
+      await callAdminRpc('store/admin_delete_iap_promo', JSON.stringify({ promoId }));
+      if (editingId === promoId) reset();
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Delete failed');
+    }
+  };
+
+  return (
+    <div className="p-4 rounded-xl bg-slate-800 border border-slate-700 mb-8 max-w-3xl">
+      <h2 className="text-sm font-semibold text-slate-300 mb-1">Promo Banner</h2>
+      <p className="text-xs text-slate-500 mb-3">
+        Display-only banner shown on the IAP screen (e.g. &quot;Weekend Double Bonus&quot;). Does not change
+        granted amounts — set bonus coins/gems on the packs for real bonuses.
+      </p>
+
+      {error && <p className="mb-3 text-sm text-red-400">{error}</p>}
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label className="block text-xs text-slate-500 mb-1">Promo ID *</label>
+          <input
+            value={form.promoId}
+            onChange={(e) => set('promoId', e.target.value)}
+            disabled={!!editingId}
+            placeholder="e.g. weekend_double_bonus"
+            className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-sm text-slate-100 placeholder:text-slate-600 disabled:opacity-60"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500 mb-1">Badge text</label>
+          <input
+            value={form.badgeText}
+            onChange={(e) => set('badgeText', e.target.value)}
+            placeholder="2×"
+            className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-sm text-slate-100 placeholder:text-slate-600"
+          />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="block text-xs text-slate-500 mb-1">Title *</label>
+          <input
+            value={form.title}
+            onChange={(e) => set('title', e.target.value)}
+            placeholder="Weekend Double Bonus!"
+            className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-sm text-slate-100 placeholder:text-slate-600"
+          />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="block text-xs text-slate-500 mb-1">Subtitle</label>
+          <input
+            value={form.subtitle}
+            onChange={(e) => set('subtitle', e.target.value)}
+            placeholder="Get 2× bonus on every pack · Ends Sunday"
+            className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-sm text-slate-100 placeholder:text-slate-600"
+          />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="block text-xs text-slate-500 mb-1">Icon URL</label>
+          <input
+            value={form.iconUrl}
+            onChange={(e) => set('iconUrl', e.target.value)}
+            placeholder="/assets/iap/promo_flame.png"
+            className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-sm text-slate-100 placeholder:text-slate-600"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500 mb-1">Starts (optional)</label>
+          <input
+            type="datetime-local"
+            value={toLocalInput(form.startsAt)}
+            onChange={(e) => set('startsAt', fromLocalInput(e.target.value))}
+            className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-sm text-slate-100"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500 mb-1">Ends (optional)</label>
+          <input
+            type="datetime-local"
+            value={toLocalInput(form.endsAt)}
+            onChange={(e) => set('endsAt', fromLocalInput(e.target.value))}
+            className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-sm text-slate-100"
+          />
+        </div>
+        <label className="flex items-center gap-2 text-sm text-slate-300">
+          <input
+            type="checkbox"
+            checked={form.isActive}
+            onChange={(e) => set('isActive', e.target.checked)}
+            className="accent-indigo-500"
+          />
+          Active
+        </label>
+      </div>
+
+      <div className="mt-4 flex gap-2">
+        <button
+          onClick={save}
+          disabled={saving}
+          className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
+        >
+          {saving ? 'Saving...' : editingId ? 'Save Changes' : 'Add Banner'}
+        </button>
+        {editingId && (
+          <button
+            onClick={reset}
+            className="px-4 py-2 rounded-lg bg-slate-700 text-slate-200 text-sm hover:bg-slate-600"
+          >
+            Cancel
+          </button>
+        )}
+      </div>
+
+      {promos.length > 0 && (
+        <div className="mt-5 space-y-2">
+          {promos.map((p) => (
+            <div
+              key={p.promoId}
+              className="flex items-center gap-3 p-3 rounded-lg bg-slate-900 border border-slate-700"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-slate-100 truncate">{p.title}</span>
+                  {p.badgeText && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-400/10 text-amber-400">
+                      {p.badgeText}
+                    </span>
+                  )}
+                  {promoIsLive(p) ? (
+                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-400/10 text-emerald-400">
+                      Live
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-slate-700 text-slate-400">
+                      {p.isActive ? 'Scheduled/Expired' : 'Inactive'}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 truncate">{p.subtitle || p.promoId}</p>
+              </div>
+              <button
+                onClick={() => {
+                  setForm(p);
+                  setEditingId(p.promoId);
+                  setError('');
+                }}
+                className="px-3 py-1.5 rounded-lg bg-slate-700 text-slate-200 text-xs hover:bg-slate-600"
+              >
+                Edit
+              </button>
+              <button
+                onClick={() => remove(p.promoId)}
+                className="px-3 py-1.5 rounded-lg bg-red-600/80 text-white text-xs hover:bg-red-500"
+              >
+                Delete
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProductSection({
   title,
   items,
@@ -335,7 +611,10 @@ function ProductSection({
             <p className="text-[11px] text-slate-500 font-mono">{p.productId}</p>
             <div className="mt-2 flex items-baseline gap-3 flex-wrap">
               {p.coinsAmount > 0 && (
-                <span className="text-sm text-amber-400">{p.coinsAmount.toLocaleString()} coins</span>
+                <span className="text-sm text-amber-400">
+                  {p.coinsAmount.toLocaleString()} coins
+                  {p.bonusCoins > 0 && ` (+${p.bonusCoins})`}
+                </span>
               )}
               {p.gemsAmount > 0 && (
                 <span className="text-sm text-purple-400">
