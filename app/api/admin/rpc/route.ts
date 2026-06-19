@@ -54,6 +54,10 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   'store/admin_update_item',
   'store/admin_delete_item',
   'store/admin_get_upload_url',
+  // IAP (in-app purchase) products – admin only
+  'store/admin_get_iap_products',
+  'store/admin_upsert_iap_product',
+  'store/admin_delete_iap_product',
   'store/admin_add_bundle',
   'store/admin_delete_bundle',
   'avatar/admin_list_avatars',
