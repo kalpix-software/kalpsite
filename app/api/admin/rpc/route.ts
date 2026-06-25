@@ -36,6 +36,7 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   'store/purchase_bundle',
   'store/get_daily_rewards',
   'store/claim_daily_reward',
+  'store/admin_update_daily_reward',
   'store/get_current_season',
   'store/purchase_premium_pass',
   'store/claim_season_reward',
