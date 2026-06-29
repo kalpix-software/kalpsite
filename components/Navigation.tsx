@@ -83,14 +83,6 @@ export default function Navigation() {
                 </motion.span>
               </Link>
             ))}
-            <Link href="/admin/login">
-              <motion.span
-                className="text-sm text-slate-500 hover:text-slate-400 transition-colors mr-4"
-                whileHover={{ opacity: 1 }}
-              >
-                Admin
-              </motion.span>
-            </Link>
             <motion.button
               onClick={() => setShowComingSoon(true)}
               className="px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full text-white font-semibold hover:shadow-lg hover:shadow-blue-500/50 transition-all"
@@ -131,13 +123,6 @@ export default function Navigation() {
                   {item.name}
                 </Link>
               ))}
-              <Link
-                href="/admin/login"
-                className="block text-slate-500 hover:text-white py-2 text-sm"
-                onClick={() => setIsMobileMenuOpen(false)}
-              >
-                Admin
-              </Link>
               <button
                 onClick={() => { setShowComingSoon(true); setIsMobileMenuOpen(false) }}
                 className="w-full px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full text-white font-semibold"

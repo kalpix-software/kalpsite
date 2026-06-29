@@ -20,6 +20,8 @@ interface ApiRpcResponse {
 export interface AuthResult {
   token: string;
   isAdmin?: boolean;
+  /** True when the account has 2FA enabled and a valid TOTP code is still needed. */
+  totpRequired?: boolean;
 }
 
 // Backend gateway URL. Set KALPIX_API_URL per environment:
@@ -75,22 +77,38 @@ export async function gameRpc(token: string, rpcId: string, payload: string): Pr
 }
 
 /**
- * Login using the game backend's auth/login_email RPC.
- * Calls the public /api/v1/auth/login_email endpoint and returns
- * the same session token the game uses.
+ * Admin login via the game backend's auth/admin_login_email RPC. This is a
+ * separate, admin-only path from the shared mobile auth/login_email: the backend
+ * enforces is_admin and, when enrolled, TOTP 2FA.
+ *
+ * Pass totpCode on the second call once the user has entered their 6-digit code
+ * (or a backup recovery code). When 2FA is enabled and no code is supplied yet,
+ * the backend responds with { totpRequired: true } and no session token.
  */
-export async function loginWithGameAuth(email: string, password: string): Promise<AuthResult> {
-  const data = (await serverRpc('auth/login_email', {
+export async function loginWithGameAuth(
+  email: string,
+  password: string,
+  totpCode?: string
+): Promise<AuthResult> {
+  const data = (await serverRpc('auth/admin_login_email', {
     email,
     password,
+    totpCode: totpCode ?? '',
     deviceId: 'kalpsite-admin',
     platform: 'web',
     deviceName: 'Kalpsite Admin',
   })) as {
     sessionToken?: string;
     isAdmin?: boolean;
+    totpRequired?: boolean;
     profile?: { isAdmin?: boolean; metadata?: { isAdmin?: boolean } };
   };
+
+  // 2FA is enabled but no (valid) code was provided yet — caller must prompt.
+  if (data?.totpRequired === true) {
+    return { token: '', totpRequired: true };
+  }
+
   const token = typeof data?.sessionToken === 'string' ? data.sessionToken.trim() : '';
   if (!token) {
     throw new Error('Game server did not return a session token');

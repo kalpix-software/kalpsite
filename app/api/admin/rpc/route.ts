@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { gameRpc } from '@/lib/kalpix-api';
-import { AUTH_COOKIE_NAME } from '@/lib/auth-cookie';
+import { AUTH_COOKIE_NAME, validateOrigin } from '@/lib/auth-cookie';
 
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
 /** Allowed RPC IDs for the admin panel. Backend still enforces is_admin for admin_* RPCs. */
 const ALLOWED_ADMIN_RPC_IDS = new Set([
   'social/get_profile_info', // session check + Plazy uses this
+  // Admin 2FA (TOTP) management — backend enforces is_admin on each.
+  'auth/admin_totp_status',
+  'auth/admin_enroll_totp',
+  'auth/admin_confirm_totp',
+  'auth/admin_disable_totp',
+  'auth/admin_regenerate_backup_codes',
   'admin/get_fake_user_conversations',
   'admin/get_fake_user_conversation_messages',
   'admin/delete_fake_user_conversations',
@@ -99,6 +105,11 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
  * Only allowlisted RPC IDs are accepted. The session must be for a user with is_admin; the backend enforces that.
  */
 export async function POST(req: NextRequest) {
+  // CSRF defense-in-depth (matches /api/auth/login) on top of the SameSite=Strict
+  // cookie — these RPCs include state-changing 2FA enroll/disable/regenerate.
+  if (!validateOrigin(req)) {
+    return NextResponse.json({ error: 'Invalid origin' }, { status: 403, headers: NO_STORE });
+  }
   const token = req.cookies.get(AUTH_COOKIE_NAME)?.value;
   if (!token) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401, headers: NO_STORE });

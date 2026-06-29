@@ -10,6 +10,13 @@ function authErrorMessage(err: unknown): string {
   if (/not verified|verify your email|register.*OTP/i.test(msg)) {
     return 'Account not verified. Complete registration: register with email, then verify using the OTP sent to your inbox.';
   }
+  // Preserve the backend's specific 2FA message — it must NOT be collapsed into
+  // the generic "invalid email or password" by the rule below (it contains
+  // "invalid"), or an admin who mistypes a code is wrongly told their password
+  // is wrong.
+  if (/2fa|two-factor|totp|authentication code/i.test(msg)) {
+    return msg;
+  }
   if (/invalid|incorrect password|not found|not registered/i.test(msg)) {
     return 'Invalid email or password.';
   }
@@ -29,12 +36,18 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const email = body.email?.trim();
     const password = body.password;
+    const totpCode = typeof body.totpCode === 'string' ? body.totpCode : undefined;
     if (!email || !password) {
       return NextResponse.json({ error: 'Email and password required' }, { status: 400, headers: NO_STORE });
     }
 
     try {
-      const { token, isAdmin } = await loginWithGameAuth(email, password);
+      const { token, isAdmin, totpRequired } = await loginWithGameAuth(email, password, totpCode);
+      // 2FA enabled and no/invalid code yet: tell the client to collect the code.
+      // No cookie is set — the session is only issued once the code verifies.
+      if (totpRequired) {
+        return NextResponse.json({ totpRequired: true }, { headers: NO_STORE });
+      }
       const sessionToken = token?.trim();
       if (!sessionToken) {
         return NextResponse.json(
