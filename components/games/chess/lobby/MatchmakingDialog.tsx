@@ -136,9 +136,6 @@ export default function MatchmakingDialog(p: MatchmakingDialogProps) {
             <div className="text-sm" style={{ color: lobbyTheme.textMuted }}>
               Searching for a player near rating {p.rating}…
             </div>
-            <div className="text-xs" style={{ color: lobbyTheme.textDim }}>
-              Falling back to bot in {secondsLeft}s
-            </div>
             <div
               className="mt-2 h-1 w-48 overflow-hidden rounded-full"
               style={{ background: lobbyTheme.cardSoft }}
@@ -156,7 +153,7 @@ export default function MatchmakingDialog(p: MatchmakingDialogProps) {
 
         {phase === 'fallback' && (
           <div className="text-sm" style={{ color: lobbyTheme.textMuted }}>
-            No human found nearby — preparing a bot…
+            Setting up your match…
           </div>
         )}
 

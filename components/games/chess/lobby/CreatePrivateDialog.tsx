@@ -314,7 +314,7 @@ export function DialogShell({
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/60 sm:items-center">
       <div
-        className="w-full max-w-md rounded-t-2xl p-5 sm:rounded-2xl"
+        className="w-full max-w-md rounded-t-2xl p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:rounded-2xl sm:pb-5"
         style={{
           background: lobbyTheme.bg,
           border: `1px solid ${lobbyTheme.divider}`,

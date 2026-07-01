@@ -373,7 +373,6 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
         <PlayerStrip
           name={opponent?.username ?? 'Waiting…'}
           rating={opponent?.rating}
-          isBot={opponent?.isBot}
           connected={opponent?.connected ?? false}
           avatarUrl={opponent?.avatarUrl}
           onClick={opponent ? () => setSelectedPlayer(opponent) : undefined}
@@ -420,7 +419,6 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
           <PlayerStrip
             name={me?.username ?? 'You'}
             rating={me?.rating}
-            isBot={false}
             connected={me?.connected ?? true}
             avatarUrl={me?.avatarUrl}
             onClick={me ? () => setSelectedPlayer(me) : undefined}
@@ -543,9 +541,6 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
             </div>
             <div className="mt-3 flex items-center justify-center gap-1.5 text-base font-semibold text-white">
               <span>{selectedPlayer.username}</span>
-              {selectedPlayer.isBot && (
-                <span className="rounded bg-purple-600/40 px-1 text-[10px]">BOT</span>
-              )}
             </div>
             <div className="mt-0.5 text-sm text-white/50">
               Rating {selectedPlayer.rating}
@@ -579,14 +574,12 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
 function PlayerStrip({
   name,
   rating,
-  isBot,
   connected,
   avatarUrl,
   onClick,
 }: {
   name: string;
   rating?: number;
-  isBot?: boolean;
   connected: boolean;
   avatarUrl?: string;
   onClick?: () => void;
@@ -611,9 +604,6 @@ function PlayerStrip({
       <div className="flex w-24 flex-col">
         <div className="flex items-center gap-1 text-sm font-medium">
           <span className="truncate">{name}</span>
-          {isBot && (
-            <span className="rounded bg-purple-600/40 px-1 text-[10px]">BOT</span>
-          )}
           <span
             className={`h-1.5 w-1.5 shrink-0 rounded-full ${
               connected ? 'bg-emerald-400' : 'bg-zinc-500'
