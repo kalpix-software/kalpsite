@@ -21,6 +21,7 @@ export type ChessSide = 'white' | 'black';
 export interface ChessPlayerWire {
   userId: string;
   username: string;
+  avatarUrl?: string;
   side: ChessSide;
   isBot: boolean;
   rating: number;

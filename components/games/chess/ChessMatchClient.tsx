@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { User as UserIcon } from 'lucide-react';
 
 import {
   KalpixClient,
@@ -14,6 +15,7 @@ import {
   decodeChessJson,
   encodeChessJson,
   type ChessIllegalPayload,
+  type ChessPlayerWire,
   type ChessSide,
   type ChessStateWire,
 } from '@/lib/kalpix-web-sdk/chess';
@@ -37,6 +39,22 @@ import ChatPanel from './ChatPanel';
 // Host is resolved at runtime (URL query → sessionStorage → env) so the
 // same kalpsite build can serve both a real device on the LAN and an
 // emulator at 10.0.2.2 from the same `next dev` instance.
+
+// In-webview debug overlays (the FEN/counters strip + the fullscreen debug
+// dump) are hidden unless NEXT_PUBLIC_DEBUG=true, so normal play stays clean.
+const DEBUG_UI = process.env.NEXT_PUBLIC_DEBUG === 'true';
+
+// Ask the native Flutter host (webview_flutter JS channel) to open a player's
+// profile screen. No-op in a plain browser, where the channel is absent.
+function openNativeProfile(userId: string) {
+  if (typeof window === 'undefined' || !userId) return;
+  const native = (window as unknown as {
+    KalpixNative?: { postMessage: (msg: string) => void };
+  }).KalpixNative;
+  if (native && typeof native.postMessage === 'function') {
+    native.postMessage(JSON.stringify({ action: 'open_profile', userId }));
+  }
+}
 
 interface PendingPromotion {
   from: string;
@@ -71,6 +89,9 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
   const [confirmResign, setConfirmResign] = useState(false);
   const [pendingPromo, setPendingPromo] = useState<PendingPromotion | null>(null);
   const [chat, setChat] = useState<ChatEntry[]>([]);
+  const [selectedPlayer, setSelectedPlayer] = useState<ChessPlayerWire | null>(
+    null,
+  );
   const [debug, setDebug] = useState<DebugInfo>({
     step: 'mounting',
     connected: false,
@@ -335,17 +356,18 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
   const drawIncoming = state.drawOfferedBy && state.drawOfferedBy !== mySide;
 
   return (
-    <div className="relative flex min-h-dvh flex-col bg-zinc-950 text-white">
-      {/* Live debug strip — counters increment per inbound message, the FEN
-          mirror lets us see if state updates are reaching the UI in real
-          time (vs. only on rejoin). Remove or gate behind NEXT_PUBLIC_DEBUG
-          once stable. */}
-      <DebugStrip
-        debug={debug}
-        fen={state.fen}
-        turn={state.turn}
-        mySide={mySide}
-      />
+    <div className="relative flex min-h-dvh flex-col bg-zinc-950 text-white pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+      {/* Live debug strip — gated behind NEXT_PUBLIC_DEBUG so it never shows in
+          normal play (the Flutter webview). Set NEXT_PUBLIC_DEBUG=true to
+          re-enable the counters / FEN mirror during development. */}
+      {DEBUG_UI && (
+        <DebugStrip
+          debug={debug}
+          fen={state.fen}
+          turn={state.turn}
+          mySide={mySide}
+        />
+      )}
       {/* Top: opponent clock + status */}
       <header className="flex items-center gap-3 px-3 pt-3">
         <PlayerStrip
@@ -353,6 +375,8 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
           rating={opponent?.rating}
           isBot={opponent?.isBot}
           connected={opponent?.connected ?? false}
+          avatarUrl={opponent?.avatarUrl}
+          onClick={opponent ? () => setSelectedPlayer(opponent) : undefined}
         />
         <div className="flex-1">
           <Clock
@@ -398,6 +422,8 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
             rating={me?.rating}
             isBot={false}
             connected={me?.connected ?? true}
+            avatarUrl={me?.avatarUrl}
+            onClick={me ? () => setSelectedPlayer(me) : undefined}
           />
           <div className="flex-1">
             <Clock
@@ -488,6 +514,62 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
           </div>
         </div>
       )}
+
+      {/* Tap-a-player info card → basic info + Visit profile (bridges to the
+          native Flutter host to open that player's profile screen). */}
+      {selectedPlayer && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
+          onClick={() => setSelectedPlayer(null)}
+        >
+          <div
+            className="w-full max-w-xs rounded-2xl bg-zinc-900 p-5 text-center shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className="mx-auto grid h-16 w-16 place-items-center overflow-hidden rounded-full"
+              style={{ background: 'rgba(255,255,255,0.08)' }}
+            >
+              {selectedPlayer.avatarUrl ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={selectedPlayer.avatarUrl}
+                  alt={selectedPlayer.username}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <UserIcon className="h-7 w-7 text-white/50" />
+              )}
+            </div>
+            <div className="mt-3 flex items-center justify-center gap-1.5 text-base font-semibold text-white">
+              <span>{selectedPlayer.username}</span>
+              {selectedPlayer.isBot && (
+                <span className="rounded bg-purple-600/40 px-1 text-[10px]">BOT</span>
+              )}
+            </div>
+            <div className="mt-0.5 text-sm text-white/50">
+              Rating {selectedPlayer.rating}
+            </div>
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => setSelectedPlayer(null)}
+                className="flex-1 rounded-lg bg-white/10 py-2.5 text-sm font-semibold text-white"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  openNativeProfile(selectedPlayer.userId);
+                  setSelectedPlayer(null);
+                }}
+                className="flex-1 rounded-lg bg-emerald-500 py-2.5 text-sm font-semibold text-white"
+              >
+                Visit profile
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -499,27 +581,50 @@ function PlayerStrip({
   rating,
   isBot,
   connected,
+  avatarUrl,
+  onClick,
 }: {
   name: string;
   rating?: number;
   isBot?: boolean;
   connected: boolean;
+  avatarUrl?: string;
+  onClick?: () => void;
 }) {
   return (
-    <div className="flex w-32 flex-col">
-      <div className="flex items-center gap-1 text-sm font-medium">
-        <span>{name}</span>
-        {isBot && <span className="rounded bg-purple-600/40 px-1 text-[10px]">BOT</span>}
-        <span
-          className={`h-1.5 w-1.5 rounded-full ${
-            connected ? 'bg-emerald-400' : 'bg-zinc-500'
-          }`}
-        />
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-2 text-left"
+    >
+      <div
+        className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full"
+        style={{ background: 'rgba(255,255,255,0.08)' }}
+      >
+        {avatarUrl ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={avatarUrl} alt={name} className="h-full w-full object-cover" />
+        ) : (
+          <UserIcon className="h-4 w-4 text-white/50" />
+        )}
       </div>
-      {typeof rating === 'number' && (
-        <div className="text-xs text-white/50">{rating}</div>
-      )}
-    </div>
+      <div className="flex w-24 flex-col">
+        <div className="flex items-center gap-1 text-sm font-medium">
+          <span className="truncate">{name}</span>
+          {isBot && (
+            <span className="rounded bg-purple-600/40 px-1 text-[10px]">BOT</span>
+          )}
+          <span
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+              connected ? 'bg-emerald-400' : 'bg-zinc-500'
+            }`}
+          />
+        </div>
+        {typeof rating === 'number' && (
+          <div className="text-xs text-white/50">{rating}</div>
+        )}
+      </div>
+    </button>
   );
 }
 
@@ -634,7 +739,7 @@ function FullscreenMessage({
     <div className="flex min-h-dvh flex-col items-center justify-center bg-zinc-950 p-8 text-center text-white">
       <div className="text-2xl font-semibold">{title}</div>
       {detail && <div className="mt-2 text-sm text-white/60">{detail}</div>}
-      {debug && (
+      {DEBUG_UI && debug && (
         <pre className="mt-6 max-w-full overflow-x-auto rounded-md bg-black/60 p-3 text-left font-mono text-[11px] leading-relaxed text-white/80">
 {`step:        ${debug.step}
 matchId:     ${matchId ?? '?'}

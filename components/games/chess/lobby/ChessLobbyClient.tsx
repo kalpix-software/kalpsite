@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft } from 'lucide-react';
 
 import { KalpixClient, resolveRuntimeHost } from '@/lib/kalpix-web-sdk';
 import {
@@ -168,23 +167,13 @@ export default function ChessLobbyClient() {
 
   return (
     <div
-      className="relative min-h-dvh"
+      className="relative min-h-dvh pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
       style={{
         background: `linear-gradient(180deg, ${lobbyTheme.bgGrad1}, ${lobbyTheme.bgGrad2} 50%, ${lobbyTheme.bgGrad3})`,
       }}
     >
-      {/* Top bar */}
-      <div className="flex items-center gap-3 px-3 pt-3">
-        <button
-          onClick={() => router.back()}
-          className="grid h-9 w-9 place-items-center rounded-full text-white/80 hover:bg-white/10"
-        >
-          <ArrowLeft className="h-5 w-5" />
-        </button>
-        <div className="text-base font-semibold text-white">Chess</div>
-      </div>
-
-      {/* Banner / rank strip */}
+      {/* Banner / rank strip. Back navigation is handled by the Flutter host
+          (native back button), so no in-webview back bar is rendered. */}
       <div className="px-3 pt-3">
         <LobbyHeader
           title={catalogItem?.name ?? 'Chess'}
