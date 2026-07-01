@@ -19,10 +19,20 @@ import {
 } from '@/lib/kalpix-web-sdk/chess';
 import { useNativeBack } from '@/hooks/useNativeBack';
 
+import {
+  ChatOp,
+  decodeChat,
+  encodeChat,
+  type ChatEntry,
+  type ChatError,
+  type ChatReplay,
+} from '@/lib/kalpix-web-sdk/chat';
+
 import Board from './Board';
 import Clock from './Clock';
 import PromotionPicker from './PromotionPicker';
 import MoveList from './MoveList';
+import ChatPanel from './ChatPanel';
 
 // Host is resolved at runtime (URL query → sessionStorage → env) so the
 // same kalpsite build can serve both a real device on the LAN and an
@@ -60,6 +70,7 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
   const [toast, setToast] = useState<string | null>(null);
   const [confirmResign, setConfirmResign] = useState(false);
   const [pendingPromo, setPendingPromo] = useState<PendingPromotion | null>(null);
+  const [chat, setChat] = useState<ChatEntry[]>([]);
   const [debug, setDebug] = useState<DebugInfo>({
     step: 'mounting',
     connected: false,
@@ -236,6 +247,23 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
         flashToast(`${by === 'white' ? 'White' : 'Black'} offered a draw`);
         return;
       }
+      case ChatOp.Text:
+      case ChatOp.Quick: {
+        const entry = decodeChat<ChatEntry>(data);
+        setChat((c) =>
+          c.some((x) => x.seq === entry.seq) ? c : [...c, entry].slice(-50),
+        );
+        return;
+      }
+      case ChatOp.Replay: {
+        const replay = decodeChat<ChatReplay>(data);
+        setChat(replay.entries ?? []);
+        return;
+      }
+      case ChatOp.Error: {
+        flashToast(decodeChat<ChatError>(data).message);
+        return;
+      }
       default:
         return;
     }
@@ -284,6 +312,14 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
 
   const sendRespondDraw = useCallback((accept: boolean) => {
     sessionRef.current?.send(ChessOp.RespondDraw, encodeChessJson({ accept }));
+  }, []);
+
+  const sendChatText = useCallback((t: string) => {
+    sessionRef.current?.send(ChatOp.Text, encodeChat({ text: t }));
+  }, []);
+
+  const sendChatQuick = useCallback((code: number) => {
+    sessionRef.current?.send(ChatOp.Quick, encodeChat({ code }));
   }, []);
 
   // ── Render ───────────────────────────────────────────────────────────
@@ -400,6 +436,13 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
         </div>
 
         <MoveList pgn={state.pgn} />
+
+        <ChatPanel
+          messages={chat}
+          myUserId={myUserIdRef.current}
+          onSendText={sendChatText}
+          onSendQuick={sendChatQuick}
+        />
       </footer>
 
       {state.gameEnded && (
