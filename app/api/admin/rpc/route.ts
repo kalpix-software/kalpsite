@@ -98,6 +98,10 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   // Cross-vertical shop — admin featured writes for the All-tab carousel.
   'shop/admin_set_featured',
   'shop/admin_list_featured',
+  // Lounges (Plato-style public rooms) — admin only.
+  'lounge/admin_list',
+  'lounge/admin_upsert',
+  'lounge/admin_set_active',
 ]);
 
 /**

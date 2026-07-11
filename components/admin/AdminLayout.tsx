@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Store, RefreshCw, LogOut, BarChart3, Package,
   CalendarCheck, Tag, Swords, Trophy, Gift, ChevronDown, ChevronRight,
   MessageSquare, Gamepad2, Users, Flag, MessageCircleWarning, Palette,
-  Sparkles, TrendingUp, ImageIcon, Coins, ShieldCheck,
+  Sparkles, TrendingUp, ImageIcon, Coins, ShieldCheck, Sofa,
 } from 'lucide-react';
 
 const SESSION_URL = '/api/auth/session';
@@ -115,6 +115,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       items: [
         { href: '/admin/achievements', label: 'Achievements', icon: Trophy },
         { href: '/admin/gifts', label: 'Gifts', icon: Gift },
+        { href: '/admin/lounges', label: 'Lounges', icon: Sofa },
       ],
     },
     {
