@@ -547,9 +547,14 @@ function StickerPricingRow({
           value={isPremium ? 'paid' : 'free'}
           onChange={(e) => {
             if (e.target.value === 'paid') {
-              // Flip to premium: seed a coins price so the single-currency
-              // invariant (exactly one price > 0) can be satisfied by the admin.
-              onPatch({ tier: 'premium', priceGems: 0, priceCoins: item.priceCoins ?? 0 });
+              // Flip to premium: seed a NON-ZERO coins price (default 1) so the
+              // single-currency invariant (exactly one price > 0) holds
+              // immediately — a premium sticker at price 0 is rejected server-side.
+              onPatch({
+                tier: 'premium',
+                priceGems: 0,
+                priceCoins: item.priceCoins && item.priceCoins > 0 ? item.priceCoins : 1,
+              });
             } else {
               // Flip to standard: both prices must be zero.
               onPatch({ tier: 'standard', priceCoins: 0, priceGems: 0 });
@@ -586,7 +591,7 @@ function StickerPricingRow({
         <span>Price</span>
         <input
           type="number"
-          min={0}
+          min={isPremium ? 1 : 0}
           value={isPremium ? price : ''}
           placeholder={isPremium ? '' : '—'}
           disabled={!isPremium}

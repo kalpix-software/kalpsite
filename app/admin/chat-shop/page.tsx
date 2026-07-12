@@ -422,6 +422,20 @@ function EditDrawer({
       if (draft.discountedPrice != null && draft.discountedPrice >= draft.price) {
         throw new Error('discountedPrice must be less than price');
       }
+      // Per-sticker pricing: a Paid (premium) sticker must have EXACTLY ONE of
+      // coins/gems > 0. Catch it here with a clear, sticker-numbered message
+      // instead of letting the server reject the whole save with a raw 500.
+      (draft.assets?.pack?.items ?? []).forEach((it, i) => {
+        if (it.tier !== 'premium') return;
+        const coins = it.priceCoins ?? 0;
+        const gems = it.priceGems ?? 0;
+        const exactlyOne = (coins > 0 && gems === 0) || (gems > 0 && coins === 0);
+        if (!exactlyOne) {
+          throw new Error(
+            `Sticker #${i + 1} is marked Paid but needs a price — set exactly one of coins or gems greater than 0.`,
+          );
+        }
+      });
       await upsertItem(draft);
       onSaved();
     } catch (e) {
