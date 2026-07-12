@@ -150,7 +150,10 @@ function TagsField({
   // current array; re-synced via useEffect when the parent's content actually
   // changes (using the joined string as the dep so a new-array-same-content
   // re-render from the parent doesn't clobber in-progress edits).
-  const joined = value.join(', ');
+  // Defensive: admin_get_pack omits empty tag arrays (json omitempty), so
+  // `value` can be undefined at runtime despite the string[] type.
+  const safeValue = value ?? [];
+  const joined = safeValue.join(', ');
   const [text, setText] = useState(joined);
   useEffect(() => {
     setText(joined);
@@ -163,7 +166,7 @@ function TagsField({
       .filter(Boolean);
     // Avoid an unnecessary onChange that would just rebroadcast the same
     // tags and trigger a re-render with no semantic change.
-    if (next.join('') !== value.join('')) {
+    if (next.join('') !== safeValue.join('')) {
       onChange(next);
     }
   };

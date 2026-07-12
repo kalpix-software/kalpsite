@@ -204,7 +204,10 @@ export async function upsertItem(req: SyncItemRequest): Promise<SyncItemResponse
 export async function getPackAssets(itemId: string): Promise<PackAssets> {
   const raw = await callAdminRpc('chat_shop/admin_get_pack', JSON.stringify({ itemId }));
   const data = unwrapAdminRpcData<PackAssets>(raw);
-  return { coverUrl: data.coverUrl ?? '', items: data.items ?? [] };
+  // The server omits empty arrays (json omitempty), so normalise each item's
+  // tags to [] — the tags editor would otherwise call .join on undefined.
+  const items = (data.items ?? []).map((it) => ({ ...it, tags: it.tags ?? [] }));
+  return { coverUrl: data.coverUrl ?? '', items };
 }
 
 export async function publishItem(itemId: string): Promise<{ shopVersion: number }> {
