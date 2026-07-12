@@ -19,6 +19,7 @@ import {
   Subcategory,
   SyncItemRequest,
   archiveItem,
+  getPackAssets,
   grantItem,
   listItemsAdmin,
   publishItem,
@@ -198,21 +199,34 @@ export default function ChatShopAdminPage() {
         items={items}
         loading={loading}
         loadError={loadError}
-        onEdit={(it) => {
-          // The detail-table assets (bubble 9-slice, pack items, …) are not
-          // returned by the admin list, so we still scaffold those from
-          // defaults — the admin re-confirms or re-uploads them as needed.
-          //
-          // The top-level store_items fields we DO have on the list row
-          // (description, iconUrl, previewUrl) are round-tripped so the
-          // admin doesn't accidentally wipe a previously uploaded preview
-          // image when editing rarity / status / price.
-          const assets = defaultAssetsFor(it.subcategory as Subcategory);
+        onEdit={async (it) => {
+          const sub = it.subcategory as Subcategory;
+          const isPack =
+            sub === 'sticker_pack' || sub === 'gif_pack' || sub === 'emote_pack';
+
+          // Pack assets (cover + items with tier/price/tags) are NOT on the
+          // admin list row, so fetch them for the edit form. Without this the
+          // form opens empty and Save — which replaces the asset list
+          // wholesale — would wipe every uploaded sticker. Non-pack detail
+          // assets (bubble 9-slice, etc.) are still scaffolded from defaults;
+          // the admin re-confirms those as before.
+          let assets = defaultAssetsFor(sub);
+          if (isPack) {
+            try {
+              const pack = await getPackAssets(it.itemId);
+              assets = { ...assets, pack };
+            } catch (e) {
+              // Do NOT open an empty edit form on failure — saving it would
+              // clear the pack. Surface the error and bail.
+              setToast(e instanceof Error ? e.message : 'Failed to load pack assets');
+              return;
+            }
+          }
           setEditing({
             mode: 'edit',
             draft: {
               itemId: it.itemId,
-              subcategory: it.subcategory as Subcategory,
+              subcategory: sub,
               slug: it.slug,
               name: it.name,
               description: it.description ?? '',

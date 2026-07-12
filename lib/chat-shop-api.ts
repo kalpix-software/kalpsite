@@ -197,6 +197,16 @@ export async function upsertItem(req: SyncItemRequest): Promise<SyncItemResponse
   return unwrapAdminRpcData<SyncItemResponse>(raw);
 }
 
+// getPackAssets loads a pack's full editable assets (cover + items with
+// tier/price/tags) for the edit form. The admin list row does NOT carry
+// assets, so without this the form opens empty and a Save — which replaces
+// the asset list wholesale — would wipe the pack.
+export async function getPackAssets(itemId: string): Promise<PackAssets> {
+  const raw = await callAdminRpc('chat_shop/admin_get_pack', JSON.stringify({ itemId }));
+  const data = unwrapAdminRpcData<PackAssets>(raw);
+  return { coverUrl: data.coverUrl ?? '', items: data.items ?? [] };
+}
+
 export async function publishItem(itemId: string): Promise<{ shopVersion: number }> {
   const raw = await callAdminRpc('chat_shop/admin_publish_item', JSON.stringify({ itemId }));
   return unwrapAdminRpcData<{ shopVersion: number }>(raw);
