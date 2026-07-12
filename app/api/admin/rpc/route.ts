@@ -104,6 +104,11 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   'lounge/admin_list',
   'lounge/admin_upsert',
   'lounge/admin_set_active',
+  // News (home-screen news posts) — admin only. news/list is app-only.
+  'news/admin_list',
+  'news/admin_upsert',
+  'news/admin_set_published',
+  'news/admin_delete',
 ]);
 
 /**
