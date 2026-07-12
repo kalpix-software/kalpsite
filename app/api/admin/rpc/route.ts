@@ -89,11 +89,13 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   'chat/admin_update_message_report_status',
   // Chat shop – admin only (see lib/chat-shop-api.ts callers).
   'chat_shop/admin_list_items',
+  'chat_shop/admin_get_pack', // load a pack's cover + items to pre-fill the edit form
   'chat_shop/admin_upsert_item',
   'chat_shop/admin_publish_item',
   'chat_shop/admin_archive_item',
   'chat_shop/admin_grant_item',
-  // Chat redesign Slice 4b — admin trending writes for the picker.
+  // Chat redesign Slice 4b — admin trending read + writes for the picker.
+  'chat_shop/admin_list_trending',
   'chat_shop/admin_set_trending',
   // Cross-vertical shop — admin featured writes for the All-tab carousel.
   'shop/admin_set_featured',
