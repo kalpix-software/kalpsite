@@ -96,6 +96,14 @@ export interface PackItem {
   shortcode?: string;   // emote packs only
   tags: string[];
   sortOrder: number;
+  // Per-sticker pricing (sticker packs only; ignored for gif/emote packs).
+  // `tier` omitted/"" => standard. A premium sticker must have EXACTLY ONE of
+  // priceCoins/priceGems > 0; a standard sticker must have both = 0. The server
+  // validates this in SyncPackItem and, for premium items, mints a per-sticker
+  // store_item so the sticker can be individually purchased.
+  tier?: 'standard' | 'premium';
+  priceCoins?: number;
+  priceGems?: number;
 }
 
 export interface PackAssets {

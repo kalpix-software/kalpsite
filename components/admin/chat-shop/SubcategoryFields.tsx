@@ -515,6 +515,93 @@ export function ThemeFields({
  * kind is used to pick the right uploader label + whether shortcode/previewUrl
  * columns are shown.
  */
+// StickerPricingRow renders the per-sticker Free/Paid pricing controls
+// (sticker packs only). The wire shape carries `tier` + `priceCoins` +
+// `priceGems` — a premium sticker MUST have exactly one price > 0 and a
+// standard sticker MUST have both = 0 (validated server-side in SyncPackItem).
+// The UI derives a single "currency" (coins|gems) from whichever price is set
+// so the admin only ever edits one number, mirroring the pack-level
+// currency/price pattern in app/admin/chat-shop/page.tsx.
+function StickerPricingRow({
+  item,
+  onPatch,
+}: {
+  item: PackItem;
+  onPatch: (partial: Partial<PackItem>) => void;
+}) {
+  const isPremium = item.tier === 'premium';
+  // Derive the active currency from whichever price is set. Gems win the tie
+  // only if coins is zero; default to coins so a freshly-flipped premium
+  // sticker edits a coins price.
+  const currency: 'coins' | 'gems' = (item.priceGems ?? 0) > 0 && (item.priceCoins ?? 0) === 0 ? 'gems' : 'coins';
+  const price = currency === 'gems' ? item.priceGems ?? 0 : item.priceCoins ?? 0;
+
+  return (
+    <div className="flex items-end gap-2 pt-1 border-t border-slate-800/60">
+      <label className="flex flex-col gap-1 text-xs text-slate-400">
+        <span>Access</span>
+        <select
+          value={isPremium ? 'paid' : 'free'}
+          onChange={(e) => {
+            if (e.target.value === 'paid') {
+              // Flip to premium: seed a coins price so the single-currency
+              // invariant (exactly one price > 0) can be satisfied by the admin.
+              onPatch({ tier: 'premium', priceGems: 0, priceCoins: item.priceCoins ?? 0 });
+            } else {
+              // Flip to standard: both prices must be zero.
+              onPatch({ tier: 'standard', priceCoins: 0, priceGems: 0 });
+            }
+          }}
+          className="px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-slate-200"
+        >
+          <option value="free">Free (standard)</option>
+          <option value="paid">Paid (premium)</option>
+        </select>
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-slate-400">
+        <span>Currency</span>
+        <select
+          value={currency}
+          disabled={!isPremium}
+          onChange={(e) => {
+            // Switching currency moves the current price to the chosen currency
+            // and zeroes the other, preserving the single-currency invariant.
+            const next = e.target.value as 'coins' | 'gems';
+            if (next === 'gems') {
+              onPatch({ priceGems: price, priceCoins: 0 });
+            } else {
+              onPatch({ priceCoins: price, priceGems: 0 });
+            }
+          }}
+          className="px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-slate-200 disabled:opacity-50"
+        >
+          <option value="coins">coins</option>
+          <option value="gems">gems</option>
+        </select>
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-slate-400">
+        <span>Price</span>
+        <input
+          type="number"
+          min={0}
+          value={isPremium ? price : ''}
+          placeholder={isPremium ? '' : '—'}
+          disabled={!isPremium}
+          onChange={(e) => {
+            const v = Math.max(0, Number(e.target.value) || 0);
+            if (currency === 'gems') {
+              onPatch({ priceGems: v, priceCoins: 0 });
+            } else {
+              onPatch({ priceCoins: v, priceGems: 0 });
+            }
+          }}
+          className="w-24 px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-slate-200 disabled:opacity-50"
+        />
+      </label>
+    </div>
+  );
+}
+
 export function PackFields({
   value,
   onChange,
@@ -535,7 +622,16 @@ export function PackFields({
     patch({
       items: [
         ...items,
-        { mediaUrl: '', previewUrl: '', shortcode: '', tags: [], sortOrder: (items[items.length - 1]?.sortOrder ?? 0) + 1 },
+        {
+          mediaUrl: '',
+          previewUrl: '',
+          shortcode: '',
+          tags: [],
+          sortOrder: (items[items.length - 1]?.sortOrder ?? 0) + 1,
+          tier: 'standard',
+          priceCoins: 0,
+          priceGems: 0,
+        },
       ],
     });
 
@@ -628,6 +724,9 @@ export function PackFields({
                   onChange={(v) => patchItem(i, { sortOrder: v })}
                 />
               </div>
+              {kind === 'sticker_pack' && (
+                <StickerPricingRow item={it} onPatch={(partial) => patchItem(i, partial)} />
+              )}
             </div>
           ))}
         </div>
