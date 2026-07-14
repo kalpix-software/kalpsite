@@ -18,8 +18,14 @@ type NewsRow = {
   postId: string; // empty for a not-yet-saved new post
   title: string;
   body: string; // markdown source
+  excerpt: string; // 1–2 line teaser for cards
+  author: string; // byline, e.g. "Kalpix Games Team"
   imageUrl: string;
-  category: string;
+  category: string; // slug (see CATEGORIES)
+  ctaLabel: string; // "" = no CTA button
+  ctaAction: string; // action token; "url:https://…" for external links
+  isPinned: boolean; // rides the featured carousel
+  priority: number; // featured ordering (higher first)
   publishAt: number; // epoch seconds
   isPublished: boolean;
   sortOrder: number;
@@ -34,7 +40,42 @@ type NewsRow = {
 type RawNews = {
   id?: string; postId?: string; title?: string; body?: string; imageUrl?: string;
   category?: string; publishAt?: number; isPublished?: boolean; sortOrder?: number;
+  excerpt?: string; author?: string; ctaLabel?: string; ctaAction?: string;
+  isPinned?: boolean; priority?: number;
 };
+
+// Enumerated categories (slug + label) — the app maps each slug to a color +
+// emoji badge. Keep in sync with the Flutter news_category.dart map.
+const CATEGORIES: { value: string; label: string }[] = [
+  { value: '', label: '— none —' },
+  { value: 'events', label: '🏆 Events' },
+  { value: 'new_drops', label: '🎫 New Drops' },
+  { value: 'updates', label: '🎮 Updates / Patch Notes' },
+  { value: 'rewards', label: '🎁 Rewards' },
+  { value: 'community', label: '👑 Community' },
+  { value: 'announcements', label: '📢 Announcements' },
+];
+
+// Preset CTA destinations. 'url' is special: the stored ctaAction becomes
+// "url:<https…>" so the app opens it externally. Keep tokens in sync with the
+// Flutter news_cta.dart resolver.
+const CTA_ACTIONS: { value: string; label: string }[] = [
+  { value: '', label: '— no button —' },
+  { value: 'tero_lobby', label: 'Open Tero lobby' },
+  { value: 'store', label: 'Open Store' },
+  { value: 'daily_rewards', label: 'Open Daily Rewards' },
+  { value: 'leaderboards', label: 'Open Leaderboards' },
+  { value: 'lounges', label: 'Open Lounges' },
+  { value: 'url', label: 'External URL…' },
+];
+
+// Derive the action-type <select> value from the stored token.
+function ctaActionType(action: string): string {
+  return action.startsWith('url:') ? 'url' : action;
+}
+function ctaUrlValue(action: string): string {
+  return action.startsWith('url:') ? action.slice(4) : '';
+}
 
 // ─── Helpers ───
 
@@ -89,8 +130,14 @@ function parseNews(raw: RawNews): NewsRow {
     postId: raw.postId || raw.id || '',
     title: raw.title || '',
     body: raw.body || '',
+    excerpt: raw.excerpt || '',
+    author: raw.author || '',
     imageUrl: raw.imageUrl || '',
     category: raw.category || '',
+    ctaLabel: raw.ctaLabel || '',
+    ctaAction: raw.ctaAction || '',
+    isPinned: raw.isPinned ?? false,
+    priority: raw.priority ?? 0,
     publishAt: raw.publishAt && raw.publishAt > 0 ? raw.publishAt : 0,
     isPublished: raw.isPublished ?? false,
     sortOrder: raw.sortOrder ?? 0,
@@ -100,7 +147,8 @@ function parseNews(raw: RawNews): NewsRow {
 function emptyNews(rows: NewsRow[]): NewsRow {
   const maxSort = rows.reduce((m, r) => Math.max(m, r.sortOrder), 0);
   return {
-    postId: '', title: '', body: '', imageUrl: '', category: '',
+    postId: '', title: '', body: '', excerpt: '', author: '', imageUrl: '', category: '',
+    ctaLabel: '', ctaAction: '', isPinned: false, priority: 0,
     publishAt: Math.floor(Date.now() / 1000), isPublished: false, sortOrder: maxSort + 1,
   };
 }
@@ -163,8 +211,14 @@ export default function AdminNewsPage() {
         ...(row.postId ? { id: row.postId } : {}),
         title: row.title.trim(),
         body: row.body,
+        excerpt: row.excerpt.trim(),
+        author: row.author.trim(),
         imageUrl: row.imageUrl,
-        category: row.category.trim(),
+        category: row.category,
+        ctaLabel: row.ctaLabel.trim(),
+        ctaAction: row.ctaAction,
+        isPinned: row.isPinned,
+        priority: row.priority,
         publishAt: row.publishAt,
         isPublished: row.isPublished,
         sortOrder: row.sortOrder,
@@ -237,9 +291,10 @@ export default function AdminNewsPage() {
           const st = publishState(post, nowSec);
           return (
             <div key={post.postId || `new-${i}`} className={`p-4 rounded-xl bg-slate-800 border space-y-3 ${post.isPublished ? 'border-slate-700' : 'border-amber-900/50'}`}>
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
                 <span className={`text-[11px] font-bold uppercase px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
-                {post.category && <span className="text-[11px] text-slate-400">{post.category}</span>}
+                {post.isPinned && <span className="text-[11px] font-bold uppercase px-2 py-0.5 rounded-full bg-indigo-900/60 text-indigo-200">★ Featured</span>}
+                {post.category && <span className="text-[11px] text-slate-400 ml-auto">{CATEGORIES.find((c) => c.value === post.category)?.label ?? post.category}</span>}
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-start">
@@ -255,20 +310,54 @@ export default function AdminNewsPage() {
                   {post.uploadingImage && <p className="text-[11px] text-slate-400">Uploading…</p>}
                 </div>
 
-                {/* Title + category + body */}
+                {/* Title, byline, category, excerpt, body, CTA */}
                 <div className="lg:col-span-6 space-y-2">
                   <div>
                     <label className="block text-[11px] text-slate-400 mb-1">Title</label>
-                    <input value={post.title} onChange={(e) => updateRow(i, { title: e.target.value })} placeholder="e.g. Ranked — Season 12 is live" className={inputCls} />
+                    <input value={post.title} onChange={(e) => updateRow(i, { title: e.target.value })} placeholder="e.g. Weekend Tero Cup — Win up to 5,000 coins" className={inputCls} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] text-slate-400 mb-1">Category</label>
+                      <select value={post.category} onChange={(e) => updateRow(i, { category: e.target.value })} className={inputCls}>
+                        {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-slate-400 mb-1">Author / source</label>
+                      <input value={post.author} onChange={(e) => updateRow(i, { author: e.target.value })} placeholder="e.g. Kalpix Games Team" className={inputCls} />
+                    </div>
                   </div>
                   <div>
-                    <label className="block text-[11px] text-slate-400 mb-1">Category (badge)</label>
-                    <input value={post.category} onChange={(e) => updateRow(i, { category: e.target.value })} placeholder="e.g. Ranked, Event, Update" className={inputCls} />
+                    <label className="block text-[11px] text-slate-400 mb-1">Excerpt (card teaser, 1–2 lines)</label>
+                    <textarea value={post.excerpt} onChange={(e) => updateRow(i, { excerpt: e.target.value })} rows={2} placeholder="Short teaser shown on the feed card." className={inputCls} />
                   </div>
                   <div>
                     <label className="block text-[11px] text-slate-400 mb-1">Body (Markdown)</label>
-                    <textarea value={post.body} onChange={(e) => updateRow(i, { body: e.target.value })} rows={5} placeholder="Write the announcement… **bold**, _italic_, [links](https://…), lists supported." className={`${inputCls} font-mono`} />
+                    <textarea value={post.body} onChange={(e) => updateRow(i, { body: e.target.value })} rows={5} placeholder="Write the article… **bold**, _italic_, [links](https://…), ## headings, lists supported." className={`${inputCls} font-mono`} />
                   </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] text-slate-400 mb-1">CTA button label</label>
+                      <input value={post.ctaLabel} onChange={(e) => updateRow(i, { ctaLabel: e.target.value })} placeholder="e.g. Join Tournament (blank = no button)" className={inputCls} />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-slate-400 mb-1">CTA opens</label>
+                      <select
+                        value={ctaActionType(post.ctaAction)}
+                        onChange={(e) => updateRow(i, { ctaAction: e.target.value === 'url' ? `url:${ctaUrlValue(post.ctaAction)}` : e.target.value })}
+                        className={inputCls}
+                      >
+                        {CTA_ACTIONS.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  {ctaActionType(post.ctaAction) === 'url' && (
+                    <div>
+                      <label className="block text-[11px] text-slate-400 mb-1">External URL</label>
+                      <input value={ctaUrlValue(post.ctaAction)} onChange={(e) => updateRow(i, { ctaAction: `url:${e.target.value}` })} placeholder="https://…" className={inputCls} />
+                    </div>
+                  )}
                 </div>
 
                 {/* Publish date + sort order + actions */}
@@ -282,6 +371,21 @@ export default function AdminNewsPage() {
                       className={inputCls}
                     />
                   </div>
+                  <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={post.isPinned}
+                      onChange={(e) => updateRow(i, { isPinned: e.target.checked })}
+                      className="w-4 h-4 accent-indigo-500"
+                    />
+                    Featured (top carousel)
+                  </label>
+                  {post.isPinned && (
+                    <div>
+                      <label className="block text-[11px] text-slate-400 mb-1">Featured priority (higher first)</label>
+                      <input type="number" value={post.priority} onChange={(e) => updateRow(i, { priority: parseInt(e.target.value, 10) || 0 })} className={inputCls} />
+                    </div>
+                  )}
                   <div>
                     <label className="block text-[11px] text-slate-400 mb-1">Sort order (tiebreak)</label>
                     <input type="number" value={post.sortOrder} onChange={(e) => updateRow(i, { sortOrder: parseInt(e.target.value, 10) || 0 })} className={inputCls} />
