@@ -8,6 +8,7 @@ import {
   CalendarCheck, Tag, Swords, Trophy, Gift, ChevronDown, ChevronRight,
   MessageSquare, Gamepad2, Users, Flag, MessageCircleWarning, Palette,
   Sparkles, TrendingUp, ImageIcon, Coins, ShieldCheck, Sofa, Newspaper,
+  Megaphone,
 } from 'lucide-react';
 
 const SESSION_URL = '/api/auth/session';
@@ -117,6 +118,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         { href: '/admin/gifts', label: 'Gifts', icon: Gift },
         { href: '/admin/lounges', label: 'Lounges', icon: Sofa },
         { href: '/admin/news', label: 'News', icon: Newspaper },
+        { href: '/admin/broadcast', label: 'Broadcast', icon: Megaphone },
       ],
     },
     {

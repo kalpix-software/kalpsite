@@ -109,6 +109,10 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   'news/admin_upsert',
   'news/admin_set_published',
   'news/admin_delete',
+  // Broadcasts (promotional push to opted-in users) — admin only.
+  'notifications/admin_broadcast',
+  'notifications/admin_list_broadcasts',
+  'notifications/admin_delete_broadcast',
 ]);
 
 /**
