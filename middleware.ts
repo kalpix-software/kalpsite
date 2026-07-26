@@ -4,10 +4,10 @@ import { LINK_HOSTS } from '@/lib/apps';
 // Host isolation for app-link subdomains (e.g. plazy.kalpixsoftware.com).
 //
 // These subdomains share this Vercel project with the main site, but should
-// ONLY serve share links (/i/* group invites, /p/* profiles) and the association
-// files (/.well-known/*) — NOT the marketing pages. For any other path on a link
-// host we bounce to the main site, so plazy.kalpixsoftware.com never exposes the
-// rest of kalpsite.
+// ONLY serve share links (/i/* group invites, /p/* profiles, /r/* referrals) and
+// the association files (/.well-known/*) — NOT the marketing pages. For any
+// other path on a link host we bounce to the main site, so
+// plazy.kalpixsoftware.com never exposes the rest of kalpsite.
 //
 // Normal hosts (www / root) are unaffected — middleware returns early.
 //
@@ -21,7 +21,12 @@ export function middleware(req: NextRequest) {
   }
 
   const path = req.nextUrl.pathname;
-  if (path.startsWith('/i/') || path.startsWith('/p/') || path.startsWith('/.well-known/')) {
+  if (
+    path.startsWith('/i/') ||
+    path.startsWith('/p/') ||
+    path.startsWith('/r/') ||
+    path.startsWith('/.well-known/')
+  ) {
     return NextResponse.next();
   }
 

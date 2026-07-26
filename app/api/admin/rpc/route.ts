@@ -109,6 +109,12 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   'news/admin_upsert',
   'news/admin_set_published',
   'news/admin_delete',
+  // Refer and Earn — admin only. get_status/redeem are app-only, and
+  // referral/resolve_code is deliberately public (the /r/<code> landing page
+  // calls it with no session), so neither belongs in this allowlist.
+  'referral/admin_list_milestones',
+  'referral/admin_upsert_milestone',
+  'referral/admin_list',
   // Broadcasts (promotional push to opted-in users) — admin only.
   'notifications/admin_broadcast',
   'notifications/admin_list_broadcasts',
