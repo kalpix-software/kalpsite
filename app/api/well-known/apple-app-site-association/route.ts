@@ -3,8 +3,8 @@ import { appForHost } from '@/lib/apps';
 
 // iOS Universal Links association file. Served (via rewrite in next.config.js) at:
 //   https://<host>/.well-known/apple-app-site-association
-// MUST be application/json with no extension and no redirect. Scoped to /i/*
-// so only invite links open the app — the rest of the host stays web.
+// MUST be application/json with no extension and no redirect. Scoped to /i/* and
+// /p/* so only share links open the app — the rest of the host stays web.
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
@@ -18,7 +18,10 @@ export async function GET(request: Request) {
       details: [
         {
           appIDs: [app.iosAppId],
-          components: [{ '/': '/i/*', comment: 'Group invite links' }],
+          components: [
+            { '/': '/i/*', comment: 'Group invite links' },
+            { '/': '/p/*', comment: 'Profile share links' },
+          ],
         },
       ],
     },
