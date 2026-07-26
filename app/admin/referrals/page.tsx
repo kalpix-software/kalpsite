@@ -129,9 +129,11 @@ export default function AdminReferralsPage() {
           isActive: row.isActive,
         }),
       );
-      setStatus({ result: `Saved tier at ${row.threshold} friends.` });
-      // Re-fetch so a newly created tier lands in threshold order.
+      // Re-fetch FIRST so a newly created tier lands in threshold order, then
+      // set the confirmation — load() clears status on entry, so setting it
+      // beforehand would wipe the message before it ever rendered.
       await load();
+      setStatus({ result: `Saved tier at ${row.threshold} friends.` });
     } catch (e) {
       setStatus({ error: e instanceof Error ? e.message : String(e) });
       patch(index, { saving: false });

@@ -23,6 +23,7 @@ export interface ChessPlayerWire {
   username: string;
   avatarUrl?: string;
   side: ChessSide;
+  isBot: boolean;
   rating: number;
   connected: boolean;
 }
