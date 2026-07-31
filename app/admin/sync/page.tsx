@@ -44,6 +44,16 @@ type CustomCategory = { key: string; label: string };
 type SpineSkin = { name: string };
 type SpineAsset = { skins?: SpineSkin[]; animations?: Record<string, unknown> };
 
+/** A subcategory whose options are rigged into another subcategory's skins (e.g. face → lip). */
+type DependentPair = { parentKey: string; childKey: string };
+
+/** What the Spine skin names declared, surfaced in the UI before anything is written. */
+type SpineStructure = {
+  subcategoryCounts: Record<string, number>;
+  dependentPairs: DependentPair[];
+  warnings: string[];
+};
+
 const BODY_KEYS = ['face', 'eyes', 'eyebrow', 'hair', 'lips'];
 const FASHION_KEYS = ['dress', 'shoes', 'watch', 'fan'];
 const BODY_ORDER = ['face', 'eyes', 'eyebrow', 'hair', 'lips'];
@@ -55,6 +65,25 @@ function humanize(s: string): string {
     .split(/\s+/)
     .map((w) => (w.length > 0 ? w[0].toUpperCase() + w.slice(1).toLowerCase() : ''))
     .join(' ');
+}
+
+/** Texture pages a libGDX/Spine atlas declares, in page order.
+ *
+ *  An atlas may pack into several sheets. Each page block starts with the image file name on
+ *  its own line — the first line of the file, or the line after a blank separator — followed by
+ *  indented or bare `key: value` properties. The Spine runtime resolves those names relative to
+ *  the atlas URL, so every page has to be uploaded next to the atlas under this exact name.
+ */
+function atlasPageFiles(atlasText: string): string[] {
+  const pages: string[] = [];
+  let afterBlank = true;
+  for (const raw of atlasText.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line === '') { afterBlank = true; continue; }
+    if (afterBlank && !line.includes(':') && /\.(png|webp|jpg|jpeg)$/i.test(line)) pages.push(line);
+    afterBlank = false;
+  }
+  return pages;
 }
 
 /** R2 key for Spine atlas: `.txt` by default; `.atlas` if the selected file uses that extension. */
@@ -88,18 +117,103 @@ function trailingNumber(optionId: string): number {
   return isNaN(n) ? -1 : n;
 }
 
-/** Parse Spine JSON and build catalog categories (same logic as the Go create_avatars_catalog script). */
-function buildCatalogFromSpine(spineJson: SpineAsset, slug: string): CatalogCategory[] {
-  const subcategoryOptions: Record<string, string[]> = {};
+/** Subcategory key implied by a leaf option id: "lip_3" -> "lip". */
+function leafSubcategoryKey(optionId: string): string {
+  const m = optionId.match(/^(.*?)_\d+$/);
+  return (m ? m[1] : optionId).trim();
+}
 
-  // Extract skins with "subcategory/optionId" pattern
+/** Parse Spine JSON and build catalog categories (same logic as the Go create_avatars_catalog script).
+ *
+ *  Two skin-name shapes are supported:
+ *    2 parts  "hair/hair_1"        independent  ->  hair: [hair_1]
+ *    3 parts  "face/face_1/lip_3"  dependent    ->  face: [face_1] + lip: [lip_3]
+ *
+ *  The 3-part form is for art that is rigged together and cannot be applied separately
+ *  (each face carries its own lip art). The catalog still lists the two halves as ordinary
+ *  independent subcategories, so each gets its own previews and store items; the app
+ *  recombines the selection back into the single real skin name when it renders.
+ */
+function buildCatalogFromSpine(
+  spineJson: SpineAsset,
+  slug: string,
+): { categories: CatalogCategory[]; structure: SpineStructure } {
+  const subcategoryOptions: Record<string, string[]> = {};
+  const dependentPairs: DependentPair[] = [];
+  const warnings: string[] = [];
+  const pairSeen = new Set<string>();
+  const dependentSkinNames = new Set<string>();
+
+  const addOption = (key: string, optionId: string) => {
+    if (!subcategoryOptions[key]) subcategoryOptions[key] = [];
+    if (!subcategoryOptions[key].includes(optionId)) subcategoryOptions[key].push(optionId);
+  };
+
   for (const skin of spineJson.skins ?? []) {
     const name = skin.name?.trim();
     if (!name || name.toLowerCase() === 'default' || !name.includes('/')) continue;
-    const [left, right] = name.split('/', 2).map((s) => s.trim());
-    if (!left || !right) continue;
-    if (!subcategoryOptions[left]) subcategoryOptions[left] = [];
-    if (!subcategoryOptions[left].includes(right)) subcategoryOptions[left].push(right);
+    const parts = name.split('/').map((s) => s.trim());
+    if (parts.some((p) => !p)) continue;
+
+    if (parts.length === 2) {
+      addOption(parts[0], parts[1]);
+      continue;
+    }
+
+    if (parts.length === 3) {
+      const [parentKey, parentOption, childOption] = parts;
+      const childKey = leafSubcategoryKey(childOption);
+      if (!childKey || childKey === parentKey) {
+        warnings.push(`Skin "${name}": leaf "${childOption}" does not name a subcategory distinct from "${parentKey}" — skipped.`);
+        continue;
+      }
+      // "face/face_1/face_1_lip_3" gives every parent its own child subcategory
+      // (face_1_lip, face_2_lip, …) instead of one shared set. The leaf must not repeat
+      // the parent option, or faces cannot share a single set of lip previews and items.
+      if (childKey.startsWith(`${parentOption}_`)) {
+        const suggested = childKey.slice(parentOption.length + 1);
+        const warnId = `repeat:${parentKey}/${parentOption}`;
+        if (!pairSeen.has(warnId)) {
+          pairSeen.add(warnId);
+          warnings.push(
+            `Skins under "${parentKey}/${parentOption}/" repeat the parent option in the leaf (e.g. "${childOption}"), ` +
+            `so they become a "${childKey}" subcategory of their own instead of joining a shared "${suggested}". ` +
+            `Rename the leaves to "${suggested}_1…N" in Spine.`,
+          );
+        }
+      }
+      addOption(parentKey, parentOption);
+      addOption(childKey, childOption);
+      dependentSkinNames.add(name);
+      const pairId = `${parentKey}>${childKey}`;
+      if (!pairSeen.has(pairId)) {
+        pairSeen.add(pairId);
+        dependentPairs.push({ parentKey, childKey });
+      }
+      continue;
+    }
+
+    warnings.push(`Skin "${name}" has ${parts.length} levels. Only 2 ("hair/hair_1") and 3 ("face/face_1/lip_3") are supported — skipped.`);
+  }
+
+  // A dependent pair is a grid: every parent option needs a skin for every child option.
+  // Anything missing is a pick the user can make that renders nothing, so name it here
+  // rather than letting it show up as an invisible face in the app.
+  for (const pair of dependentPairs) {
+    const parents = subcategoryOptions[pair.parentKey] ?? [];
+    const children = subcategoryOptions[pair.childKey] ?? [];
+    const missing: string[] = [];
+    for (const p of parents) {
+      for (const c of children) {
+        if (!dependentSkinNames.has(`${pair.parentKey}/${p}/${c}`)) missing.push(`${pair.parentKey}/${p}/${c}`);
+      }
+    }
+    if (missing.length > 0) {
+      warnings.push(
+        `${pair.parentKey} × ${pair.childKey}: ${missing.length} of ${parents.length * children.length} combinations have no skin ` +
+        `(e.g. ${missing.slice(0, 3).join(', ')}). Those selections will render nothing.`,
+      );
+    }
   }
 
   // Extract animations
@@ -108,6 +222,20 @@ function buildCatalogFromSpine(spineJson: SpineAsset, slug: string): CatalogCate
       .filter((k) => k.trim().toLowerCase() !== 'default')
       .sort();
     if (animOpts.length > 0) subcategoryOptions['animation'] = animOpts;
+  }
+
+  // Option ids end up in the store item slug ({avatarId}_{subcategoryKey}_{optionId}) and in the
+  // preview object key (avatars/{slug}/previews/{sub}/{optionId}.webp). The R2 key keeps only
+  // [A-Za-z0-9-_.], so an id with a space or "+" is uploaded under a different name than the
+  // catalog points at, and the preview silently never resolves.
+  for (const [key, opts] of Object.entries(subcategoryOptions)) {
+    const unsafe = opts.filter((o) => o.replace(/[^a-zA-Z0-9\-_.]/g, '') !== o);
+    if (unsafe.length > 0) {
+      warnings.push(
+        `${key}: ${unsafe.map((o) => `"${o}"`).join(', ')} contain characters that cannot be used in a preview file name or store item slug. ` +
+        `Rename them in Spine to letters, digits, dash, underscore or dot.`,
+      );
+    }
   }
 
   // Sort options naturally
@@ -121,37 +249,34 @@ function buildCatalogFromSpine(spineJson: SpineAsset, slug: string): CatalogCate
     groups[topCategory(key)][key] = opts;
   }
 
+  // Half of a dependent pair has no skin of its own ("face/face_1" and "lip/lip_3" both
+  // resolve to nothing) — the real skin is "face/face_1/lip_3", which only exists once both
+  // halves are picked. Leave skinName off rather than writing a name that never resolves.
+  const dependentKeys = new Set(dependentPairs.flatMap((p) => [p.parentKey, p.childKey]));
+
   function buildSubcategories(order: string[], all: Record<string, string[]>, isAnimation: boolean): CatalogSubcategory[] {
     const seen = new Set<string>();
     const result: CatalogSubcategory[] = [];
+    const buildOne = (k: string, opts: string[]): CatalogSubcategory => ({
+      key: k,
+      label: k,
+      options: opts.map((oid) => ({
+        optionId: oid,
+        label: humanize(oid),
+        ...(!isAnimation && !dependentKeys.has(k) ? { skinName: `${k}/${oid}` } : {}),
+        // Same path pattern as cosmetic previews so R2 uploads (subcategory/optionId.webp) match after sync.
+        previewUrl: `avatars/${slug}/previews/${k}/${oid}.webp`,
+      })),
+    });
     for (const k of order) {
       if (!all[k] || seen.has(k)) continue;
       seen.add(k);
-      result.push({
-        key: k,
-        label: k,
-        options: all[k].map((oid) => ({
-          optionId: oid,
-          label: humanize(oid),
-          ...(!isAnimation ? { skinName: `${k}/${oid}` } : {}),
-          // Same path pattern as cosmetic previews so R2 uploads (subcategory/optionId.webp) match after sync.
-          previewUrl: `avatars/${slug}/previews/${k}/${oid}.webp`,
-        })),
-      });
+      result.push(buildOne(k, all[k]));
     }
     // Remaining keys not in order
     for (const [k, opts] of Object.entries(all)) {
       if (seen.has(k)) continue;
-      result.push({
-        key: k,
-        label: k,
-        options: opts.map((oid) => ({
-          optionId: oid,
-          label: humanize(oid),
-          ...(!isAnimation ? { skinName: `${k}/${oid}` } : {}),
-          previewUrl: `avatars/${slug}/previews/${k}/${oid}.webp`,
-        })),
-      });
+      result.push(buildOne(k, opts));
     }
     return result;
   }
@@ -169,7 +294,65 @@ function buildCatalogFromSpine(spineJson: SpineAsset, slug: string): CatalogCate
   if (Object.keys(groups.others).length > 0) {
     categories.push({ key: 'others', label: 'Others', subcategories: buildSubcategories([], groups.others, false) });
   }
-  return categories;
+
+  const subcategoryCounts: Record<string, number> = {};
+  for (const [k, opts] of Object.entries(subcategoryOptions)) subcategoryCounts[k] = opts.length;
+
+  return { categories, structure: { subcategoryCounts, dependentPairs, warnings } };
+}
+
+// ─── Catalog shape guard ───
+//
+// Store item identity is `{avatarID}_{subcategoryKey}_{optionId}` (backend
+// services/store/sync_avatar_items.go), and ownership rows point at that slug. So renaming a
+// subcategory or dropping an option orphans everything users already bought under the old key.
+// Before the first write we diff the incoming shape against what the DB already holds and make
+// the admin acknowledge anything destructive.
+
+type CatalogShape = Record<string, string[]>;
+
+function shapeOf(categories: CatalogCategory[]): CatalogShape {
+  const shape: CatalogShape = {};
+  for (const cat of categories) {
+    for (const sub of cat.subcategories ?? []) {
+      const ids = (sub.options ?? []).map((o) => o.optionId).sort();
+      shape[sub.key] = [...(shape[sub.key] ?? []), ...ids].sort();
+    }
+  }
+  return shape;
+}
+
+type ShapeDiff = {
+  addedSubcategories: string[];
+  removedSubcategories: string[];
+  addedOptions: string[];
+  removedOptions: string[];
+};
+
+function diffShapes(prev: CatalogShape, next: CatalogShape): ShapeDiff {
+  const prevKeys = Object.keys(prev);
+  const nextKeys = Object.keys(next);
+  const addedOptions: string[] = [];
+  const removedOptions: string[] = [];
+  for (const k of nextKeys) {
+    if (!prev[k]) continue; // whole subcategory is new; reported separately
+    for (const id of next[k]) if (!prev[k].includes(id)) addedOptions.push(`${k}/${id}`);
+  }
+  for (const k of prevKeys) {
+    if (!next[k]) continue; // whole subcategory is gone; reported separately
+    for (const id of prev[k]) if (!next[k].includes(id)) removedOptions.push(`${k}/${id}`);
+  }
+  return {
+    addedSubcategories: nextKeys.filter((k) => !prev[k]),
+    removedSubcategories: prevKeys.filter((k) => !next[k]),
+    addedOptions,
+    removedOptions,
+  };
+}
+
+/** Only removals orphan existing store items; additions are always safe. */
+function isBreakingDiff(d: ShapeDiff | null): boolean {
+  return !!d && (d.removedSubcategories.length > 0 || d.removedOptions.length > 0);
 }
 
 function buildDefaultSelection(categories: CatalogCategory[]): Record<string, string> {
@@ -387,7 +570,8 @@ export default function AdminAvatarsPage() {
   const [slug, setSlug] = useState('');
   const [spineJsonFile, setSpineJsonFile] = useState<File | null>(null);
   const [spineAtlasFile, setSpineAtlasFile] = useState<File | null>(null);
-  const [spineTextureFile, setSpineTextureFile] = useState<File | null>(null);
+  // One entry per atlas page — an atlas may pack into several sheets.
+  const [spineTextureFiles, setSpineTextureFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<{ result?: string; error?: string }>({});
 
@@ -418,6 +602,11 @@ export default function AdminAvatarsPage() {
   const [newCatKey, setNewCatKey] = useState('');
   const [newCatLabel, setNewCatLabel] = useState('');
   const [pendingCatalogBundle, setPendingCatalogBundle] = useState<RawCatalogBundle | null>(null);
+
+  // What the Spine skin names declared, plus how it differs from the catalog already in the DB.
+  const [spineStructure, setSpineStructure] = useState<SpineStructure | null>(null);
+  const [shapeDiff, setShapeDiff] = useState<ShapeDiff | null>(null);
+  const [shapeAck, setShapeAck] = useState(false);
 
   // Avatar list state
   const [listAvatars, setListAvatars] = useState<AvatarListItem[]>([]);
@@ -607,31 +796,81 @@ export default function AdminAvatarsPage() {
     if (!slug.trim()) { setUploadStatus({ error: 'Enter an avatar slug (e.g. avatar1)' }); return; }
     if (!spineJsonFile) { setUploadStatus({ error: 'Select the Spine .json file' }); return; }
     if (!spineAtlasFile) { setUploadStatus({ error: 'Select the Spine atlas file (.txt or .atlas)' }); return; }
-    if (!spineTextureFile) { setUploadStatus({ error: 'Select the Spine texture image (.webp or .png)' }); return; }
+    if (spineTextureFiles.length === 0) { setUploadStatus({ error: 'Select the Spine texture image(s) (.webp or .png) — one per atlas page' }); return; }
 
     setUploading(true);
     setUploadStatus({});
     setParseError(null);
+    setSpineStructure(null);
+    setShapeDiff(null);
+    setShapeAck(false);
     try {
       const s = slug.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
 
       // 1. Read and parse the Spine JSON to extract skins/animations
       const jsonText = await spineJsonFile.text();
       const spineData = JSON.parse(jsonText) as SpineAsset;
-      const categories = buildCatalogFromSpine(spineData, s);
+      const { categories, structure } = buildCatalogFromSpine(spineData, s);
       if (categories.length === 0) {
-        setUploadStatus({ error: 'No skins found in the Spine JSON. Skins must use "subcategory/optionId" naming (e.g. "hair/hair_1").' });
+        setUploadStatus({ error: 'No skins found in the Spine JSON. Skins must use "subcategory/optionId" naming (e.g. "hair/hair_1"), or "subcategory/optionId/dependentOptionId" for rigged-together art (e.g. "face/face_1/lip_3").' });
+        setUploading(false);
+        return;
+      }
+      setSpineStructure(structure);
+
+      // Diff against the catalog already stored for this slug, so a naming change that would
+      // orphan existing store items has to be acknowledged before anything is written.
+      try {
+        const raw = await callRpc('avatar/get_character_catalog', JSON.stringify({ slug: s }));
+        const existing = unwrapAdminRpcData<{ categories?: CatalogCategory[] }>(raw)?.categories ?? [];
+        if (existing.length > 0) setShapeDiff(diffShapes(shapeOf(existing), shapeOf(categories)));
+      } catch {
+        // No catalog yet for this slug (first upload) — nothing to compare against.
+      }
+
+      // 2. Upload the Spine files to avatars/{slug}/spine/.
+      //
+      // The skeleton and atlas get deterministic {slug} names because the backend builds their
+      // URLs from the slug alone. Texture pages must NOT be renamed: the runtime reads the page
+      // names out of the atlas text and fetches each one relative to the atlas URL, so the object
+      // key has to match the name the atlas declares — and there may be several.
+      const atlasText = await spineAtlasFile.text();
+      const pages = atlasPageFiles(atlasText);
+      if (pages.length === 0) {
+        setUploadStatus({ error: `No texture pages declared in ${spineAtlasFile.name}. The atlas should name each sheet on its own line (e.g. "${s}.webp").` });
+        setUploading(false);
+        return;
+      }
+      // The R2 key keeps only [A-Za-z0-9-_.]; anything else would be stored under a name the
+      // atlas does not reference, which fails at load with no upload error to point at.
+      const unsafe = pages.filter((p) => p.replace(/[^a-zA-Z0-9\-_.]/g, '') !== p);
+      if (unsafe.length > 0) {
+        setUploadStatus({ error: `These texture page names cannot be stored as-is: ${unsafe.join(', ')}. Rename the images (letters, digits, dash, underscore, dot only) and re-export the atlas so it references the new names.` });
         setUploading(false);
         return;
       }
 
-      // 2. Upload 3 Spine files to R2: avatars/{slug}/spine/{slug}.json, .txt (or .atlas), .webp
-      const textureExt = spineTextureFile.name.endsWith('.png') ? '.png' : '.webp';
+      const selectedByName = new Map(spineTextureFiles.map((f) => [f.name, f]));
+      const missing = pages.filter((p) => !selectedByName.has(p));
+      const extra = spineTextureFiles.map((f) => f.name).filter((n) => !pages.includes(n));
+      if (missing.length > 0 || extra.length > 0) {
+        setUploadStatus({
+          error: [
+            `Texture selection does not match the ${pages.length} page${pages.length !== 1 ? 's' : ''} declared in the atlas.`,
+            missing.length > 0 ? `Missing: ${missing.join(', ')}.` : '',
+            extra.length > 0 ? `Not referenced by the atlas: ${extra.join(', ')}.` : '',
+            'Pick exactly the files the atlas names — they are uploaded under those names.',
+          ].filter(Boolean).join(' '),
+        });
+        setUploading(false);
+        return;
+      }
+
       const atlasKey = spineAtlasObjectKey(s, spineAtlasFile);
       await Promise.all([
         uploadFileToR2(spineJsonFile, 'avatar_spine', s, `${s}.json`),
         uploadFileToR2(spineAtlasFile, 'avatar_spine', s, atlasKey),
-        uploadFileToR2(spineTextureFile, 'avatar_spine', s, `${s}${textureExt}`),
+        ...pages.map((p) => uploadFileToR2(selectedByName.get(p)!, 'avatar_spine', s, p)),
       ]);
 
       // 3. Build catalog bundle and show category assignment step
@@ -650,7 +889,8 @@ export default function AdminAvatarsPage() {
       setParsed(null);
       setPriceRows([]);
       const uploadVerb = SKIP_R2_SPINE_UPLOAD ? 'reused from R2 (upload skipped — local mode)' : 'uploaded to R2';
-      setUploadStatus({ result: `Spine assets ${uploadVerb}. ${categories.reduce((n, c) => n + c.subcategories.reduce((m, sub) => m + sub.options.length, 0), 0)} options found. Review category assignments below, then confirm to set prices.` });
+      const pageNote = `${pages.length} texture page${pages.length !== 1 ? 's' : ''} (${pages.join(', ')})`;
+      setUploadStatus({ result: `Spine assets ${uploadVerb}: skeleton, atlas, ${pageNote}. ${categories.reduce((n, c) => n + c.subcategories.reduce((m, sub) => m + sub.options.length, 0), 0)} options found. Review category assignments below, then confirm to set prices.` });
     } catch (e) {
       setUploadStatus({ error: e instanceof Error ? e.message : 'Upload failed' });
     } finally {
@@ -806,6 +1046,12 @@ export default function AdminAvatarsPage() {
 
   const confirmAssignments = async () => {
     if (!pendingCatalogBundle) return;
+    // First write to the DB happens below. Removals rename store item slugs, which orphans
+    // ownership rows for anything users already bought — never do that silently.
+    if (isBreakingDiff(shapeDiff) && !shapeAck) {
+      setSaveStatus({ loading: false, error: 'This catalog removes subcategories or options that already exist in the database. Review the change above and tick the acknowledgement before syncing.' });
+      return;
+    }
     const avatars = pendingCatalogBundle.avatars.map((avatar) => {
       const originalCategories = avatar.catalog?.categories ?? avatar.categories ?? [];
       const rebuiltCategories = rebuildCatalogWithAssignments(originalCategories, assignments, customCategories);
@@ -1045,8 +1291,14 @@ export default function AdminAvatarsPage() {
               <input type="file" accept=".txt,.atlas" onChange={(e) => setSpineAtlasFile(e.target.files?.[0] ?? null)} className="w-full text-sm text-slate-300 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600" />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Texture atlas (.webp or .png)</label>
-              <input type="file" accept=".webp,.png" onChange={(e) => setSpineTextureFile(e.target.files?.[0] ?? null)} className="w-full text-sm text-slate-300 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600" />
+              <label className="block text-xs text-slate-400 mb-1">Texture pages (.webp or .png) — select all</label>
+              <input type="file" accept=".webp,.png" multiple onChange={(e) => setSpineTextureFiles(Array.from(e.target.files ?? []))} className="w-full text-sm text-slate-300 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600" />
+              <p className="mt-1 text-[11px] text-slate-500">
+                An atlas can pack into several sheets. Select every page the atlas names — they are uploaded under those exact names, so the runtime can resolve them.
+              </p>
+              {spineTextureFiles.length > 0 && (
+                <p className="mt-1 text-[11px] text-slate-400 font-mono">{spineTextureFiles.length} selected: {spineTextureFiles.map((f) => f.name).join(', ')}</p>
+              )}
             </div>
           </div>
           <button type="button" onClick={handleSpineUploadAndParse} disabled={uploading} className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500 disabled:opacity-50">
@@ -1055,6 +1307,70 @@ export default function AdminAvatarsPage() {
           {uploadStatus.result && <p className="mt-2 text-sm text-green-400">{uploadStatus.result}</p>}
           {uploadStatus.error && <p className="mt-2 text-sm text-red-400">{uploadStatus.error}</p>}
         </div>
+
+        {/* ─── Derived structure: what the skin names declared, before anything is written ─── */}
+        {spineStructure && (
+          <div className="p-4 rounded-xl bg-slate-800 border border-slate-700">
+            <h2 className="font-medium text-slate-100 mb-2">Structure read from Spine</h2>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {Object.entries(spineStructure.subcategoryCounts).sort(([a], [b]) => a.localeCompare(b)).map(([key, count]) => (
+                <span key={key} className="px-2 py-1 rounded bg-slate-900 border border-slate-600 font-mono text-xs text-slate-200">
+                  {key} <span className="text-slate-400">({count})</span>
+                </span>
+              ))}
+            </div>
+
+            {spineStructure.dependentPairs.length > 0 && (
+              <div className="mb-3 p-3 rounded-lg bg-slate-900 border border-slate-600">
+                <p className="text-xs text-slate-300 mb-1">Dependent pairs (3-level skin names):</p>
+                {spineStructure.dependentPairs.map((p) => (
+                  <p key={`${p.parentKey}>${p.childKey}`} className="font-mono text-xs text-indigo-300">
+                    {p.parentKey} + {p.childKey} → {p.parentKey}/&#123;{p.parentKey}&#125;/&#123;{p.childKey}&#125;
+                  </p>
+                ))}
+                <p className="text-xs text-slate-400 mt-1">
+                  Picked separately in the app; recombined into the single real skin at render time.
+                </p>
+              </div>
+            )}
+
+            {spineStructure.warnings.length > 0 && (
+              <ul className="mb-1 space-y-1">
+                {spineStructure.warnings.map((w, i) => (
+                  <li key={i} className="text-xs text-amber-400">⚠ {w}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {/* ─── Shape diff vs the catalog already in the DB ─── */}
+        {shapeDiff && (shapeDiff.addedSubcategories.length > 0 || shapeDiff.removedSubcategories.length > 0 || shapeDiff.addedOptions.length > 0 || shapeDiff.removedOptions.length > 0) && (
+          <div className={`p-4 rounded-xl border ${isBreakingDiff(shapeDiff) ? 'bg-red-950/40 border-red-700' : 'bg-slate-800 border-slate-700'}`}>
+            <h2 className="font-medium text-slate-100 mb-2">Change vs the saved catalog</h2>
+            <div className="space-y-1 text-xs font-mono">
+              {shapeDiff.addedSubcategories.map((k) => <p key={`+s${k}`} className="text-green-400">+ subcategory {k}</p>)}
+              {shapeDiff.removedSubcategories.map((k) => <p key={`-s${k}`} className="text-red-400">− subcategory {k}</p>)}
+              {shapeDiff.addedOptions.slice(0, 20).map((k) => <p key={`+o${k}`} className="text-green-400">+ {k}</p>)}
+              {shapeDiff.addedOptions.length > 20 && <p className="text-slate-400">…and {shapeDiff.addedOptions.length - 20} more additions</p>}
+              {shapeDiff.removedOptions.slice(0, 20).map((k) => <p key={`-o${k}`} className="text-red-400">− {k}</p>)}
+              {shapeDiff.removedOptions.length > 20 && <p className="text-slate-400">…and {shapeDiff.removedOptions.length - 20} more removals</p>}
+            </div>
+            {isBreakingDiff(shapeDiff) && (
+              <>
+                <p className="mt-3 text-xs text-red-300">
+                  Store items are keyed <span className="font-mono">{'{avatarId}_{subcategoryKey}_{optionId}'}</span>. Removing a subcategory or option
+                  orphans the store items under the old key, so anything users already purchased there will show as unowned. Re-check the Spine skin
+                  names before continuing.
+                </p>
+                <label className="mt-2 flex items-center gap-2 text-xs text-slate-200">
+                  <input type="checkbox" checked={shapeAck} onChange={(e) => setShapeAck(e.target.checked)} className="accent-red-500" />
+                  I understand this orphans existing store items and want to sync anyway.
+                </label>
+              </>
+            )}
+          </div>
+        )}
 
         {/* ─── Category assignment step ─── */}
         {assignments.length > 0 && pendingCatalogBundle && (
