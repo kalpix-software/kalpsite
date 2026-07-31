@@ -309,14 +309,18 @@ function buildCatalogFromSpine(
 // Before the first write we diff the incoming shape against what the DB already holds and make
 // the admin acknowledge anything destructive.
 
-type CatalogShape = Record<string, string[]>;
+type CatalogShape = Record<string, { categoryKey: string; optionIds: string[] }>;
 
 function shapeOf(categories: CatalogCategory[]): CatalogShape {
   const shape: CatalogShape = {};
   for (const cat of categories) {
     for (const sub of cat.subcategories ?? []) {
-      const ids = (sub.options ?? []).map((o) => o.optionId).sort();
-      shape[sub.key] = [...(shape[sub.key] ?? []), ...ids].sort();
+      const ids = (sub.options ?? []).map((o) => o.optionId);
+      const prev = shape[sub.key];
+      shape[sub.key] = {
+        categoryKey: prev?.categoryKey ?? cat.key,
+        optionIds: [...(prev?.optionIds ?? []), ...ids].sort(),
+      };
     }
   }
   return shape;
@@ -327,26 +331,41 @@ type ShapeDiff = {
   removedSubcategories: string[];
   addedOptions: string[];
   removedOptions: string[];
+  /** Absent from the upload but kept by the backend, so not a removal. */
+  preservedSubcategories: string[];
 };
 
 function diffShapes(prev: CatalogShape, next: CatalogShape): ShapeDiff {
   const prevKeys = Object.keys(prev);
   const nextKeys = Object.keys(next);
+
+  // Mirrors mergeMissingCategories in the backend (services/avatar/avatar.go): a whole
+  // top-level category the incoming catalog cannot produce — "background", managed on the
+  // backgrounds admin page rather than by Spine — is carried forward untouched by the sync.
+  // Reporting those as removals would be a false alarm, and a guard that cries wolf gets
+  // clicked through.
+  const incomingCategoryKeys = new Set(Object.values(next).map((v) => v.categoryKey));
+  const preservedSubcategories = prevKeys.filter(
+    (k) => !next[k] && !incomingCategoryKeys.has(prev[k].categoryKey),
+  );
+  const preserved = new Set(preservedSubcategories);
+
   const addedOptions: string[] = [];
   const removedOptions: string[] = [];
   for (const k of nextKeys) {
     if (!prev[k]) continue; // whole subcategory is new; reported separately
-    for (const id of next[k]) if (!prev[k].includes(id)) addedOptions.push(`${k}/${id}`);
+    for (const id of next[k].optionIds) if (!prev[k].optionIds.includes(id)) addedOptions.push(`${k}/${id}`);
   }
   for (const k of prevKeys) {
-    if (!next[k]) continue; // whole subcategory is gone; reported separately
-    for (const id of prev[k]) if (!next[k].includes(id)) removedOptions.push(`${k}/${id}`);
+    if (!next[k]) continue; // whole subcategory is gone or preserved; reported separately
+    for (const id of prev[k].optionIds) if (!next[k].optionIds.includes(id)) removedOptions.push(`${k}/${id}`);
   }
   return {
     addedSubcategories: nextKeys.filter((k) => !prev[k]),
-    removedSubcategories: prevKeys.filter((k) => !next[k]),
+    removedSubcategories: prevKeys.filter((k) => !next[k] && !preserved.has(k)),
     addedOptions,
     removedOptions,
+    preservedSubcategories,
   };
 }
 
@@ -1345,7 +1364,7 @@ export default function AdminAvatarsPage() {
         )}
 
         {/* ─── Shape diff vs the catalog already in the DB ─── */}
-        {shapeDiff && (shapeDiff.addedSubcategories.length > 0 || shapeDiff.removedSubcategories.length > 0 || shapeDiff.addedOptions.length > 0 || shapeDiff.removedOptions.length > 0) && (
+        {shapeDiff && (shapeDiff.addedSubcategories.length > 0 || shapeDiff.removedSubcategories.length > 0 || shapeDiff.addedOptions.length > 0 || shapeDiff.removedOptions.length > 0 || shapeDiff.preservedSubcategories.length > 0) && (
           <div className={`p-4 rounded-xl border ${isBreakingDiff(shapeDiff) ? 'bg-red-950/40 border-red-700' : 'bg-slate-800 border-slate-700'}`}>
             <h2 className="font-medium text-slate-100 mb-2">Change vs the saved catalog</h2>
             <div className="space-y-1 text-xs font-mono">
@@ -1355,6 +1374,9 @@ export default function AdminAvatarsPage() {
               {shapeDiff.addedOptions.length > 20 && <p className="text-slate-400">…and {shapeDiff.addedOptions.length - 20} more additions</p>}
               {shapeDiff.removedOptions.slice(0, 20).map((k) => <p key={`-o${k}`} className="text-red-400">− {k}</p>)}
               {shapeDiff.removedOptions.length > 20 && <p className="text-slate-400">…and {shapeDiff.removedOptions.length - 20} more removals</p>}
+              {shapeDiff.preservedSubcategories.map((k) => (
+                <p key={`=${k}`} className="text-slate-400">= subcategory {k} — not in this upload, kept as-is by the sync</p>
+              ))}
             </div>
             {isBreakingDiff(shapeDiff) && (
               <>
