@@ -26,7 +26,7 @@ type AvatarListItem = {
   sortOrder?: number;
 };
 
-type CatalogOption = { optionId: string; label: string; previewUrl?: string; skinName?: string; currencyType?: string; price?: number; discountedPrice?: number; purchaseLimit?: number };
+type CatalogOption = { optionId: string; label: string; previewUrl?: string; skinName?: string; skinDeps?: string; currencyType?: string; price?: number; discountedPrice?: number; purchaseLimit?: number };
 type CatalogSubcategory = { key: string; label: string; options: CatalogOption[] };
 type CatalogCategory = { key: string; label: string; subcategories: CatalogSubcategory[] };
 type CatalogPart = { defaultSelection?: Record<string, string>; categories: CatalogCategory[] };
@@ -41,7 +41,8 @@ type CustomCategory = { key: string; label: string };
 
 // ─── Spine JSON parsing (mirrors kalpix-avatars/scripts/create_avatars_catalog logic) ───
 
-type SpineSkin = { name: string };
+type SpineAttachment = { type?: string; path?: string };
+type SpineSkin = { name: string; attachments?: Record<string, Record<string, SpineAttachment>> };
 type SpineAsset = { skins?: SpineSkin[]; animations?: Record<string, unknown> };
 
 /** A subcategory whose options are rigged into another subcategory's skins (e.g. face → lip). */
@@ -67,23 +68,50 @@ function humanize(s: string): string {
     .join(' ');
 }
 
-/** Texture pages a libGDX/Spine atlas declares, in page order.
+/** What a libGDX/Spine atlas declares: its texture pages, in order, and its region names.
  *
  *  An atlas may pack into several sheets. Each page block starts with the image file name on
  *  its own line — the first line of the file, or the line after a blank separator — followed by
- *  indented or bare `key: value` properties. The Spine runtime resolves those names relative to
- *  the atlas URL, so every page has to be uploaded next to the atlas under this exact name.
+ *  indented or bare `key: value` properties, then the regions packed into it. The Spine runtime
+ *  resolves page names relative to the atlas URL, so every page has to be uploaded next to the
+ *  atlas under this exact name.
  */
-function atlasPageFiles(atlasText: string): string[] {
+function parseAtlas(atlasText: string): { pages: string[]; regions: Set<string> } {
   const pages: string[] = [];
+  const regions = new Set<string>();
   let afterBlank = true;
   for (const raw of atlasText.split(/\r?\n/)) {
     const line = raw.trim();
     if (line === '') { afterBlank = true; continue; }
-    if (afterBlank && !line.includes(':') && /\.(png|webp|jpg|jpeg)$/i.test(line)) pages.push(line);
+    if (!line.includes(':')) {
+      // Region names sit at column 0 in the compact export format too, so only a blank
+      // line (or the start of the file) plus an image extension marks a page header.
+      if (afterBlank && /\.(png|webp|jpg|jpeg)$/i.test(line)) pages.push(line);
+      else regions.add(line);
+    }
     afterBlank = false;
   }
-  return pages;
+  return { pages, regions };
+}
+
+/** Attachments whose artwork must exist in the atlas, as `{ imageName -> skin that uses it }`.
+ *
+ *  An attachment refers to its artwork by name (its `path`, defaulting to the attachment name).
+ *  Only image-backed types matter — bounding boxes, paths, points and clipping masks carry no art.
+ */
+function skeletonImageRefs(spineJson: SpineAsset): Map<string, string> {
+  const refs = new Map<string, string>();
+  for (const skin of spineJson.skins ?? []) {
+    for (const attachments of Object.values(skin.attachments ?? {})) {
+      for (const [attachmentName, attachment] of Object.entries(attachments ?? {})) {
+        const type = attachment?.type ?? 'region';
+        if (type !== 'region' && type !== 'mesh' && type !== 'linkedmesh') continue;
+        const image = attachment?.path || attachmentName;
+        if (!refs.has(image)) refs.set(image, skin.name);
+      }
+    }
+  }
+  return refs;
 }
 
 /** R2 key for Spine atlas: `.txt` by default; `.atlas` if the selected file uses that extension. */
@@ -249,10 +277,21 @@ function buildCatalogFromSpine(
     groups[topCategory(key)][key] = opts;
   }
 
-  // Half of a dependent pair has no skin of its own ("face/face_1" and "lip/lip_3" both
-  // resolve to nothing) — the real skin is "face/face_1/lip_3", which only exists once both
-  // halves are picked. Leave skinName off rather than writing a name that never resolves.
-  const dependentKeys = new Set(dependentPairs.flatMap((p) => [p.parentKey, p.childKey]));
+  // Half of a dependent pair names no skin on its own — the real skin is "face/face_1/lip_3",
+  // which exists only once both halves are picked. Each half therefore carries a *fragment* of
+  // that name plus skinDeps, saying which other subcategory completes it and on which side:
+  //
+  //   face_1 -> skinName "face/face_1", skinDeps "/lip"   leading "/" = partner goes after me
+  //   lip_3  -> skinName "lip_3",       skinDeps "face"   no leading "/" = partner goes before me
+  //
+  // Joining either one with the partner's fragment yields the same "face/face_1/lip_3". The
+  // parent fragment keeps the group prefix so the join produces all three parts.
+  const dependencyOf = new Map<string, string>();
+  for (const pair of dependentPairs) {
+    dependencyOf.set(pair.parentKey, `/${pair.childKey}`);
+    dependencyOf.set(pair.childKey, pair.parentKey);
+  }
+  const childKeys = new Set(dependentPairs.map((p) => p.childKey));
 
   function buildSubcategories(order: string[], all: Record<string, string[]>, isAnimation: boolean): CatalogSubcategory[] {
     const seen = new Set<string>();
@@ -263,7 +302,10 @@ function buildCatalogFromSpine(
       options: opts.map((oid) => ({
         optionId: oid,
         label: humanize(oid),
-        ...(!isAnimation && !dependentKeys.has(k) ? { skinName: `${k}/${oid}` } : {}),
+        // The child half drops the group prefix; the parent half keeps it so the joined
+        // name has all three parts. Animations name no skin at all.
+        ...(!isAnimation ? { skinName: childKeys.has(k) ? oid : `${k}/${oid}` } : {}),
+        ...(dependencyOf.has(k) ? { skinDeps: dependencyOf.get(k) } : {}),
         // Same path pattern as cosmetic previews so R2 uploads (subcategory/optionId.webp) match after sync.
         previewUrl: `avatars/${slug}/previews/${k}/${oid}.webp`,
       })),
@@ -829,6 +871,24 @@ export default function AdminAvatarsPage() {
       // 1. Read and parse the Spine JSON to extract skins/animations
       const jsonText = await spineJsonFile.text();
       const spineData = JSON.parse(jsonText) as SpineAsset;
+      const atlasText = await spineAtlasFile.text();
+
+      // The skeleton and the atlas refer to artwork by name. If the skeleton asks for a name the
+      // atlas does not define, the Spine runtime throws while loading and the WHOLE avatar fails —
+      // not just that piece. Catch it here: an avatar that cannot load must never reach R2.
+      const { pages, regions } = parseAtlas(atlasText);
+      const dangling = [...skeletonImageRefs(spineData)].filter(([image]) => !regions.has(image));
+      if (dangling.length > 0) {
+        const shown = dangling.slice(0, 8).map(([image, skin]) => `"${image}" (used by ${skin})`);
+        setUploadStatus({
+          error: `${spineJsonFile.name} references ${dangling.length} image${dangling.length !== 1 ? 's' : ''} that ${spineAtlasFile.name} does not contain: ${shown.join(', ')}` +
+            `${dangling.length > 8 ? `, and ${dangling.length - 8} more` : ''}. ` +
+            `The avatar would fail to load with "Error reading attachment". Ask the animator to relink these attachments in Spine, then re-export all three files together.`,
+        });
+        setUploading(false);
+        return;
+      }
+
       const { categories, structure } = buildCatalogFromSpine(spineData, s);
       if (categories.length === 0) {
         setUploadStatus({ error: 'No skins found in the Spine JSON. Skins must use "subcategory/optionId" naming (e.g. "hair/hair_1"), or "subcategory/optionId/dependentOptionId" for rigged-together art (e.g. "face/face_1/lip_3").' });
@@ -853,8 +913,6 @@ export default function AdminAvatarsPage() {
       // URLs from the slug alone. Texture pages must NOT be renamed: the runtime reads the page
       // names out of the atlas text and fetches each one relative to the atlas URL, so the object
       // key has to match the name the atlas declares — and there may be several.
-      const atlasText = await spineAtlasFile.text();
-      const pages = atlasPageFiles(atlasText);
       if (pages.length === 0) {
         setUploadStatus({ error: `No texture pages declared in ${spineAtlasFile.name}. The atlas should name each sheet on its own line (e.g. "${s}.webp").` });
         setUploading(false);
