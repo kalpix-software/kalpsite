@@ -24,6 +24,8 @@ type AvatarListItem = {
   isActive: boolean;
   randomlyAssignable?: boolean;
   sortOrder?: number;
+  /** subcategoryKey -> optionId seeded into a new user's currentSelection. */
+  defaultSelection?: Record<string, string>;
 };
 
 type CatalogOption = { optionId: string; label: string; previewUrl?: string; skinName?: string; skinDeps?: string; currencyType?: string; price?: number; discountedPrice?: number; purchaseLimit?: number };
@@ -664,6 +666,14 @@ export default function AdminAvatarsPage() {
   const [newCatLabel, setNewCatLabel] = useState('');
   const [pendingCatalogBundle, setPendingCatalogBundle] = useState<RawCatalogBundle | null>(null);
 
+  // Per-avatar default selection (what a new user starts with).
+  const [defaultsSlug, setDefaultsSlug] = useState('');
+  const [defaultsCatalog, setDefaultsCatalog] = useState<CatalogCategory[]>([]);
+  const [defaultsSel, setDefaultsSel] = useState<Record<string, string>>({});
+  const [defaultsLoading, setDefaultsLoading] = useState(false);
+  const [savingDefaultKey, setSavingDefaultKey] = useState('');
+  const [defaultsStatus, setDefaultsStatus] = useState<{ result?: string; error?: string }>({});
+
   // What the Spine skin names declared, plus how it differs from the catalog already in the DB.
   const [spineStructure, setSpineStructure] = useState<SpineStructure | null>(null);
   const [shapeDiff, setShapeDiff] = useState<ShapeDiff | null>(null);
@@ -823,6 +833,44 @@ export default function AdminAvatarsPage() {
       setPreviewExists({});
     } catch {
       setPreviewUploadStatus({ error: `Failed to load catalog for ${avatarSlug}` });
+    }
+  };
+
+  // ─── Default selection (what a brand-new user starts this avatar with) ───
+
+  const loadDefaultsForAvatar = async (slug: string) => {
+    setDefaultsSlug(slug);
+    setDefaultsStatus({});
+    setDefaultsSel(listAvatars.find((a) => a.slug === slug)?.defaultSelection ?? {});
+    if (!slug) { setDefaultsCatalog([]); return; }
+    setDefaultsLoading(true);
+    try {
+      const raw = await callRpc('avatar/get_character_catalog', JSON.stringify({ slug }));
+      setDefaultsCatalog(unwrapAdminRpcData<{ categories?: CatalogCategory[] }>(raw)?.categories ?? []);
+    } catch {
+      setDefaultsCatalog([]);
+      setDefaultsStatus({ error: `Failed to load catalog for ${slug}` });
+    } finally {
+      setDefaultsLoading(false);
+    }
+  };
+
+  /** Seeds new users' currentSelection for this subcategory. Stored in avatar_catalogs.default_selection. */
+  const setDefaultOption = async (subcategoryKey: string, optionId: string) => {
+    if (!defaultsSlug || !optionId) return;
+    setSavingDefaultKey(subcategoryKey);
+    setDefaultsStatus({});
+    try {
+      await callRpc('avatar/admin_set_default_option', JSON.stringify({ slug: defaultsSlug, subcategoryKey, optionId }));
+      setDefaultsSel((prev) => ({ ...prev, [subcategoryKey]: optionId }));
+      setListAvatars((prev) => prev.map((a) => (a.slug === defaultsSlug
+        ? { ...a, defaultSelection: { ...(a.defaultSelection ?? {}), [subcategoryKey]: optionId } }
+        : a)));
+      setDefaultsStatus({ result: `Default ${subcategoryKey} set to ${optionId}.` });
+    } catch (e) {
+      setDefaultsStatus({ error: e instanceof Error ? e.message : 'Failed to set default' });
+    } finally {
+      setSavingDefaultKey('');
     }
   };
 
@@ -1644,6 +1692,98 @@ export default function AdminAvatarsPage() {
             {saveStatus.error && <p className="mt-2 text-sm text-red-400">{saveStatus.error}</p>}
           </div>
         )}
+
+        {/* ─── Default selection (what a brand-new user starts with) ─── */}
+        <div className="p-4 rounded-xl bg-slate-800 border border-slate-700">
+          <h2 className="font-medium text-slate-100 mb-2 flex items-center gap-2">
+            <List className="w-4 h-4" />
+            Default selection
+          </h2>
+          <p className="text-slate-400 text-xs mb-3">
+            What a brand-new user starts this avatar with — one option per subcategory. Saved to
+            <code className="bg-slate-700 px-1 rounded mx-1">avatar_catalogs.default_selection</code>
+            and applied the moment you change a dropdown. Existing users keep their own selection.
+          </p>
+
+          <div className="mb-3 max-w-sm">
+            <label className="block text-xs text-slate-400 mb-1">Avatar</label>
+            <select
+              value={defaultsSlug}
+              onChange={(e) => void loadDefaultsForAvatar(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm"
+            >
+              <option value="">Select an avatar...</option>
+              {listAvatars.map((a) => (
+                <option key={a.avatarId} value={a.slug}>{a.avatarName} ({a.slug})</option>
+              ))}
+            </select>
+          </div>
+
+          {defaultsLoading && <p className="text-slate-400 text-sm">Loading catalog...</p>}
+
+          {!defaultsLoading && defaultsSlug && defaultsCatalog.length === 0 && (
+            <p className="text-amber-400 text-sm">No catalog saved for this avatar yet — sync its Spine assets first.</p>
+          )}
+
+          {!defaultsLoading && defaultsCatalog.length > 0 && (
+            <div className="overflow-x-auto rounded-lg border border-slate-600">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-700 text-slate-200">
+                  <tr>
+                    <th className="text-left px-3 py-2">Subcategory</th>
+                    <th className="text-left px-3 py-2 w-64">Default option</th>
+                    <th className="text-left px-3 py-2 w-20">Preview</th>
+                  </tr>
+                </thead>
+                <tbody className="text-slate-300">
+                  {defaultsCatalog.flatMap((cat) => cat.subcategories.map((sub) => {
+                    const current = defaultsSel[sub.key] ?? '';
+                    const chosen = sub.options.find((o) => o.optionId === current);
+                    // Half of a dependent pair renders nothing on its own, so a default that
+                    // sets one side and not the other leaves new users with missing art.
+                    const partnerKey = sub.options[0]?.skinDeps?.replace(/^\//, '') ?? '';
+                    const partnerMissing = !!partnerKey && !defaultsSel[partnerKey];
+                    return (
+                      <tr key={`${cat.key}/${sub.key}`} className="border-t border-slate-600">
+                        <td className="px-3 py-2">
+                          <span className="font-mono text-xs">{sub.key}</span>
+                          <span className="text-slate-500 text-xs ml-2">{cat.label}</span>
+                          {partnerMissing && (
+                            <p className="text-amber-400 text-[11px] mt-0.5">
+                              pairs with &quot;{partnerKey}&quot; — set that one too, or this renders nothing
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          <select
+                            value={current}
+                            disabled={savingDefaultKey === sub.key}
+                            onChange={(e) => void setDefaultOption(sub.key, e.target.value)}
+                            className="w-full px-2 py-1 rounded bg-slate-900 border border-slate-600 text-slate-100 text-xs disabled:opacity-50"
+                          >
+                            <option value="">(none)</option>
+                            {sub.options.map((o) => (
+                              <option key={o.optionId} value={o.optionId}>{o.label || o.optionId}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-3 py-2">
+                          {chosen?.previewUrl
+                            // eslint-disable-next-line @next/next/no-img-element
+                            ? <img src={chosen.previewUrl} alt={chosen.optionId} className="w-10 h-10 object-contain rounded bg-slate-900" />
+                            : <span className="text-slate-600 text-xs">—</span>}
+                        </td>
+                      </tr>
+                    );
+                  }))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {defaultsStatus.result && <p className="mt-2 text-sm text-green-400">{defaultsStatus.result}</p>}
+          {defaultsStatus.error && <p className="mt-2 text-sm text-red-400">{defaultsStatus.error}</p>}
+        </div>
 
         {/* ─── Preview images (step 4 — requires catalog saved first) ─── */}
         <div className="p-4 rounded-xl bg-slate-800 border border-slate-700">
