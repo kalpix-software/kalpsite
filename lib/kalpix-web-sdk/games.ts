@@ -123,13 +123,28 @@ export interface GameStatsResponse {
 
 export interface StoreItem {
   itemId: string;
+  slug?: string;
   name: string;
   subcategory: string;
   iconUrl: string;
+  previewUrl?: string;
+  price?: { coins?: number; gems?: number };
   priceCoins: number;
   priceCurrency?: string;
   isOwned: boolean;
   isEquipped: boolean;
+  metadata?: Record<string, string>;
+}
+
+/** Equipped cosmetic slots for one (user, game). Null = bundled default. */
+export interface GamePreferences {
+  gameId: string;
+  gameSlug?: string;
+  equippedCardDeckId?: string;
+  equippedBackgroundId?: string;
+  equippedBoardId?: string;
+  equippedPieceSetId?: string;
+  updatedAt?: number;
 }
 
 export class GameApi {
@@ -174,11 +189,66 @@ export class GameApi {
     });
   }
 
+  /**
+   * Game-upgrade catalog for one game + subcategory.
+   *
+   * `category` carries the game slug — store/get_items has no gameId field, so
+   * passing one silently returns every game's upgrades instead of this game's.
+   */
   getStoreItems(args: {
     gameId: string;
     subcategory: string;
-  }): Promise<{ items: StoreItem[] }> {
-    return this.http.call<{ items: StoreItem[] }>('store/get_items', args);
+    limit?: number;
+  }): Promise<{ items: StoreItem[]; total?: number }> {
+    return this.http.call<{ items: StoreItem[]; total?: number }>('store/get_items', {
+      upgradeType: 'game_upgrade',
+      category: args.gameId,
+      subcategory: args.subcategory,
+      limit: args.limit ?? 100,
+    });
+  }
+
+  /** Currently equipped cosmetics for a game. */
+  getPreferences(gameId: string): Promise<GamePreferences> {
+    return this.http.call<GamePreferences>('game/get_preferences', { gameId });
+  }
+
+  /** Equip an item the user already owns. The slot comes from its subcategory. */
+  applyCosmetic(args: { gameId: string; itemId: string }): Promise<GamePreferences> {
+    return this.http.call<GamePreferences>('game/apply_cosmetic', args);
+  }
+
+  /** Unequip whatever occupies a slot, falling back to the bundled default. */
+  clearCosmetic(args: { gameId: string; cosmeticType: string }): Promise<GamePreferences> {
+    return this.http.call<GamePreferences>('game/clear_cosmetic', args);
+  }
+
+  /**
+   * Price an unowned item without spending anything. `alreadyOwned` comes back
+   * true (and the price zeroed) when the user already has it, so the UI can
+   * show "Apply" instead of "Buy & Apply".
+   */
+  quoteBuyAndApply(args: { gameId: string; itemId: string }): Promise<{
+    itemId: string;
+    subcategory: string;
+    currencyType: string;
+    unitPrice: number;
+    discountedUnitPrice?: number | null;
+    totalPrice?: number;
+    alreadyOwned?: boolean;
+    balance?: number;
+    canAfford?: boolean;
+  }> {
+    return this.http.call('game/buy_and_apply_cosmetic', { ...args, quote: true });
+  }
+
+  /** Purchase and equip in one transaction. */
+  commitBuyAndApply(args: {
+    gameId: string;
+    itemId: string;
+    idempotencyKey?: string;
+  }): Promise<{ success?: boolean; message?: string }> {
+    return this.http.call('game/buy_and_apply_cosmetic', { ...args, quote: false });
   }
 
   // ── Chess-specific RPCs (mirrors src/chess_game.go) ─────────────────────

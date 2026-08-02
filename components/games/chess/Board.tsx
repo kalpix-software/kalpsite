@@ -33,6 +33,13 @@ export interface BoardProps {
   onMove(from: string, to: string, promotion?: 'q' | 'r' | 'b' | 'n'): void;
   onPromotionNeeded(from: string, to: string): void;
 
+  /**
+   * Bumped by the parent whenever the server rejects a move. Releases the
+   * optimistic hold on a dropped piece immediately, so it returns to its real
+   * square instead of sitting on an illegal one until the safety timeout.
+   */
+  rejectedAt?: number;
+
   /** Full-res board image for THIS viewer. Falls back to a CSS checkerboard. */
   boardUrl?: string;
   /**
@@ -167,13 +174,28 @@ function checkedKingSquare(fen: string): string | null {
 
 export default function Board(props: BoardProps) {
   const {
-    fen, orientation, turn, mySide, lastMove, interactive,
+    fen, orientation, turn, mySide, lastMove, interactive, rejectedAt,
     onMove, onPromotionNeeded, boardUrl, whitePieceSetBaseUrl, blackPieceSetBaseUrl,
   } = props;
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [drag, setDrag] = useState<{ square: string; x: number; y: number } | null>(null);
+
+  /**
+   * A drag-drop the server has not confirmed yet.
+   *
+   * Without this the piece would render back at its origin for one network
+   * round-trip (the FEN hasn't changed yet), then slide origin → destination
+   * when the new state lands — visibly retracing the path the finger just
+   * took. Holding it at the drop square with no transition means the piece
+   * simply stays where it was released, and the authoritative FEN arriving a
+   * moment later moves nothing.
+   *
+   * Only drags set this. A tap-to-move SHOULD glide, because the player never
+   * physically carried the piece across the board.
+   */
+  const [dropped, setDropped] = useState<{ id: number; to: string } | null>(null);
 
   // ── Piece identity ────────────────────────────────────────────────────
   // Pieces are keyed by a stable id rather than by square, so React updates
@@ -243,17 +265,42 @@ export default function Board(props: BoardProps) {
   }, [myTurn]);
 
   const commitMove = useCallback(
-    (from: string, to: string) => {
+    (from: string, to: string, viaDrag = false) => {
       setSelected(null);
       setDrag(null);
       if (isPromotionMove(fen, from, to)) {
+        // No optimistic hold for promotions: the move isn't sent until the
+        // player picks a piece, and a cancel would strand the pawn on the
+        // destination square with nothing to clear it.
         onPromotionNeeded(from, to);
         return;
       }
+      // Track the mover by id, not by origin square: once the new FEN lands
+      // the piece IS on `to`, and a square-based check would then mistake it
+      // for the piece it captured and blank it for a frame.
+      const movedId = idsRef.current.get(from);
+      if (viaDrag && movedId !== undefined) setDropped({ id: movedId, to });
       onMove(from, to);
     },
     [fen, onMove, onPromotionNeeded],
   );
+
+  // Release the optimistic hold once authoritative state lands. By then the
+  // piece's carried id already places it on the destination, so clearing
+  // moves nothing on screen.
+  // ...or when the server explicitly rejects it. A rejection leaves the FEN
+  // untouched, so without this signal only the timeout below would recover.
+  useEffect(() => {
+    setDropped(null);
+  }, [fen, rejectedAt]);
+
+  // Last resort, for a move that is never answered at all: a piece frozen on
+  // a square it never reached is worse than a late snap back.
+  useEffect(() => {
+    if (!dropped) return;
+    const t = window.setTimeout(() => setDropped(null), 2500);
+    return () => window.clearTimeout(t);
+  }, [dropped]);
 
   /** Pointer position → square, or null when outside the board. */
   const squareAt = useCallback(
@@ -310,8 +357,10 @@ export default function Board(props: BoardProps) {
       // player can complete the move with a second tap.
       if (!target || target === from) return;
       if ((dests.get(from) ?? []).includes(target)) {
-        commitMove(from, target);
+        commitMove(from, target, true);
       } else {
+        // Illegal drop — clearing the drag alone returns the piece to its
+        // origin square, which is exactly the wanted behaviour.
         setSelected(null);
       }
     },
@@ -390,7 +439,17 @@ export default function Board(props: BoardProps) {
       {/* Pieces */}
       {pieces.map((piece) => {
         const dragging = drag?.square === piece.square;
-        const { col, row } = squareToXY(piece.square, orientation);
+
+        // An unconfirmed drop: show the mover where it was released rather
+        // than where the (still stale) FEN says it is. Once the FEN catches
+        // up, square === to and this turns itself off.
+        const held = dropped != null && piece.id === dropped.id && piece.square !== dropped.to;
+        // Hide whatever occupied the destination so a capture doesn't briefly
+        // render both pieces stacked. Excludes the mover itself by id.
+        if (dropped != null && piece.square === dropped.to && piece.id !== dropped.id) return null;
+
+        const renderSquare = held ? dropped.to : piece.square;
+        const { col, row } = squareToXY(renderSquare, orientation);
         const style: React.CSSProperties = {
           width: '12.5%',
           height: '12.5%',
@@ -401,9 +460,10 @@ export default function Board(props: BoardProps) {
           backgroundSize: 'contain',
           backgroundRepeat: 'no-repeat',
           backgroundPosition: 'center',
-          // Only animate settled pieces — a transition on the dragged piece
-          // would make it lag the finger.
-          transition: dragging ? 'none' : 'transform 180ms ease-out',
+          // No transition while dragging (it would lag the finger) and none
+          // on a held drop (it would animate the retrace this whole mechanism
+          // exists to remove). Everything else glides.
+          transition: dragging || held ? 'none' : 'transform 180ms ease-out',
           zIndex: dragging ? 20 : 10,
           willChange: 'transform',
         };

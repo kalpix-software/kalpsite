@@ -112,6 +112,10 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
   // answers (or forever, if they own nothing) — Board handles both.
   const [cosmetics, setCosmetics] = useState<ChessCosmeticsWire | null>(null);
 
+  // Timestamp of the last server move rejection. Only meaningful as a change
+  // signal — the board watches it to drop its optimistic piece placement.
+  const [rejectedAt, setRejectedAt] = useState(0);
+
   const bumpDebug = useCallback((patch: Partial<DebugInfo>) => {
     setDebug((d) => ({ ...d, ...patch }));
   }, []);
@@ -277,9 +281,12 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
         const payload = decodeChessJson<ChessIllegalPayload>(data);
         flashToast(`Illegal: ${payload.reason}`);
         // Force re-render from current authoritative state to revert any
-        // optimistic UI movement the board may have applied.
+        // optimistic UI movement the board may have applied. The FEN is
+        // unchanged by a rejection, so the board needs this explicit signal
+        // to release a dropped piece rather than waiting out its timeout.
         setState((s) => (s ? { ...s } : s));
         setStateAt(Date.now());
+        setRejectedAt(Date.now());
         return;
       }
       case ChessOp.DrawOffered: {
@@ -434,6 +441,7 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
           mySide={mySide}
           lastMove={state.lastMove}
           interactive={interactive && myTurn}
+          rejectedAt={rejectedAt}
           onMove={(from, to) => sendMove(from, to)}
           onPromotionNeeded={(from, to) => setPendingPromo({ from, to })}
           boardUrl={cosmetics?.boardUrl}

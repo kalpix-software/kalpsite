@@ -202,7 +202,7 @@ export default function ChessLobbyClient() {
       )}
       {tab === 'rank' && games && <RankTab games={games} myUserId={myUserId} />}
       {tab === 'rules' && games && <RulesTab games={games} />}
-      {tab === 'upgrades' && <UpgradesTab />}
+      {tab === 'upgrades' && games && <UpgradesTab games={games} />}
 
       <ActiveMatchBar
         matches={activeMatches}
