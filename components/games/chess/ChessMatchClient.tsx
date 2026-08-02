@@ -14,6 +14,7 @@ import {
   ChessOp,
   decodeChessJson,
   encodeChessJson,
+  type ChessCosmeticsWire,
   type ChessIllegalPayload,
   type ChessPlayerWire,
   type ChessSide,
@@ -106,6 +107,10 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
   const clientRef = useRef<KalpixClient | null>(null);
   const sessionRef = useRef<MatchSession | null>(null);
   const myUserIdRef = useRef<string>('');
+
+  // This viewer's own board/background. Null until get_chess_cosmetics
+  // answers (or forever, if they own nothing) — Board handles both.
+  const [cosmetics, setCosmetics] = useState<ChessCosmeticsWire | null>(null);
 
   const bumpDebug = useCallback((patch: Partial<DebugInfo>) => {
     setDebug((d) => ({ ...d, ...patch }));
@@ -207,6 +212,20 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
         }
         sessionRef.current = session;
         bumpDebug({ step: 'joined', joined: true });
+
+        // Per-viewer cosmetics (board + background). The piece sets are NOT
+        // read from here — each player's set arrives in match state so the
+        // opponent's pieces render in the set they equipped. Non-fatal: a
+        // failure just means default art.
+        try {
+          const cosmetics = await client.http.call<ChessCosmeticsWire>(
+            'get_chess_cosmetics',
+            {},
+          );
+          if (!cancelled) setCosmetics(cosmetics ?? null);
+        } catch {
+          // Ignore — Board falls back to the CSS checkerboard.
+        }
       } catch (e) {
         if (cancelled) return;
         const msg = e instanceof Error ? e.message : String(e);
@@ -258,7 +277,7 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
         const payload = decodeChessJson<ChessIllegalPayload>(data);
         flashToast(`Illegal: ${payload.reason}`);
         // Force re-render from current authoritative state to revert any
-        // optimistic UI movement chessground may have applied.
+        // optimistic UI movement the board may have applied.
         setState((s) => (s ? { ...s } : s));
         setStateAt(Date.now());
         return;
@@ -312,6 +331,18 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
   const mySide: ChessSide | null = me?.side ?? null;
   const orientation: ChessSide = mySide ?? 'white';
 
+  // Piece sets are per-SIDE, not per-viewer: each player's own set paints
+  // their sixteen pieces on both screens. Resolve by side rather than by
+  // "me / opponent" so spectators see the same board the players do.
+  const whitePieceSet = useMemo(
+    () => state?.players.find((p) => p.side === 'white')?.pieceSetBaseUrl,
+    [state],
+  );
+  const blackPieceSet = useMemo(
+    () => state?.players.find((p) => p.side === 'black')?.pieceSetBaseUrl,
+    [state],
+  );
+
   const interactive = !!(state?.gameStarted && !state?.gameEnded && mySide);
 
   const sendMove = useCallback(
@@ -356,7 +387,12 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
   const drawIncoming = state.drawOfferedBy && state.drawOfferedBy !== mySide;
 
   return (
-    <div className="relative flex min-h-dvh flex-col bg-zinc-950 text-white pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div
+      className="relative flex min-h-dvh flex-col bg-zinc-950 bg-cover bg-center text-white pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
+      // Surface behind the board. Per-viewer like the board itself; the
+      // zinc-950 class stays as the fallback when nothing is equipped.
+      style={cosmetics?.backgroundUrl ? { backgroundImage: `url(${cosmetics.backgroundUrl})` } : undefined}
+    >
       {/* Live debug strip — gated behind NEXT_PUBLIC_DEBUG so it never shows in
           normal play (the Flutter webview). Set NEXT_PUBLIC_DEBUG=true to
           re-enable the counters / FEN mirror during development. */}
@@ -400,6 +436,9 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
           interactive={interactive && myTurn}
           onMove={(from, to) => sendMove(from, to)}
           onPromotionNeeded={(from, to) => setPendingPromo({ from, to })}
+          boardUrl={cosmetics?.boardUrl}
+          whitePieceSetBaseUrl={whitePieceSet}
+          blackPieceSetBaseUrl={blackPieceSet}
         />
         {pendingPromo && mySide && (
           <PromotionPicker
