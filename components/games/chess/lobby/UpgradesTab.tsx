@@ -110,11 +110,23 @@ export default function UpgradesTab({
         // Quote first so an unaffordable purchase fails before the wallet is
         // touched, and an already-owned item skips straight to equipping.
         const quote = await games.quoteBuyAndApply({ gameId: GAME_ID, itemId: item.itemId });
-        if (quote.canAfford === false && !quote.alreadyOwned) {
+        // The quote has no "canAfford" flag — derive it from the balance it
+        // does return. (An earlier version checked a field that never existed,
+        // so the guard silently never fired.) An already-owned item costs
+        // nothing, so it skips the check entirely.
+        const price = quote.totalPrice ?? 0;
+        const balance = quote.walletBalance ?? 0;
+        if (!quote.alreadyOwned && price > balance) {
           setError('Not enough balance for this item.');
           return;
         }
-        await games.commitBuyAndApply({ gameId: GAME_ID, itemId: item.itemId });
+        // The quote mints the idempotency key and commit requires it — that
+        // pairing is what makes a retried purchase charge exactly once.
+        await games.commitBuyAndApply({
+          gameId: GAME_ID,
+          itemId: item.itemId,
+          idempotencyKey: quote.idempotencyKey,
+        });
         // Re-read: the item is now both owned and equipped.
         if (active) await loadItems(active);
         if (active) await onEquipped?.(active, item);

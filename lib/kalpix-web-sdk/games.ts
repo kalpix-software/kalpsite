@@ -360,17 +360,29 @@ export class GameApi {
     discountedUnitPrice?: number | null;
     totalPrice?: number;
     alreadyOwned?: boolean;
-    balance?: number;
-    canAfford?: boolean;
+    walletBalance?: number;
+    newBalanceAfter?: number;
+    /**
+     * Minted by the quote and REQUIRED by commit — the server rejects a
+     * commit without it. It is what makes a retried purchase charge once, so
+     * never generate one client-side; always pass back the quote's.
+     */
+    idempotencyKey: string;
+    expiresAt?: number;
   }> {
     return this.http.call(BUY_AND_APPLY_RPC, { ...args, quote: true });
   }
 
-  /** Purchase and equip in one transaction. */
+  /**
+   * Purchase and equip in one transaction.
+   *
+   * `idempotencyKey` must be the one returned by quoteBuyAndApply — the server
+   * rejects a commit without it, and it's what stops a retry double-charging.
+   */
   commitBuyAndApply(args: {
     gameId: string;
     itemId: string;
-    idempotencyKey?: string;
+    idempotencyKey: string;
   }): Promise<{ success?: boolean; message?: string }> {
     return this.http.call(BUY_AND_APPLY_RPC, { ...args, quote: false });
   }
