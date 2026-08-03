@@ -22,6 +22,11 @@ export interface MatchmakingDialogProps {
   timeControl: 'blitz' | 'rapid';
   rating: number;
   provisional?: boolean;
+  /**
+   * Entry-fee bracket ("beginner" | "medium" | "elite"). Undefined/empty means
+   * a free table, which is the only kind that falls back to a bot.
+   */
+  tier?: string;
   onClose(cancelled: boolean): void;
   onMatchReady(matchId: string): void;
 }
@@ -54,14 +59,21 @@ export default function MatchmakingDialog(p: MatchmakingDialogProps) {
         // server matchmaker pairs within a rating band that widens with ticket
         // age (±150→±350→±800 established; ±400→±1000 provisional). After
         // HUMAN_WAIT_MS with no human in band, fall back to a bot.
+        // Tier MUST be in the query string, not just the properties: the
+        // matchmaker's groupKey doesn't include tier, so the query is the only
+        // thing keeping a beginner out of an elite pairing. The server also
+        // re-checks unanimity and refuses a mismatched match.
+        const tier = p.tier ?? '';
+        const tierToken = tier ? ` +properties.tier:${tier}` : ' +properties.tier:free';
         const handle = findMatch(p.client.socket, {
           minCount: 2,
           maxCount: 2,
-          query: `+properties.gameId:chess +properties.timeControl:${p.timeControl} +properties.rated:true`,
+          query: `+properties.gameId:chess +properties.timeControl:${p.timeControl} +properties.rated:true${tierToken}`,
           stringProperties: {
             gameId: 'chess',
             timeControl: p.timeControl,
             rated: 'true',
+            tier: tier || 'free',
             // Server-side matchmaker expands the rating band by ticket age; this
             // tells it to start wider for unsettled (provisional) players.
             provisional: p.provisional ? 'true' : 'false',
@@ -70,6 +82,16 @@ export default function MatchmakingDialog(p: MatchmakingDialogProps) {
           timeoutMs: HUMAN_WAIT_MS,
           onTimeout: async () => {
             if (cancelled) return null;
+            // No bot fallback on a PAID table. A bot stakes nothing while the
+            // human stakes the fee, so a human win would mint coins from
+            // nowhere — the server rejects add_bot on paid matches, and this
+            // avoids driving into that error. Paid queues keep waiting for a
+            // human instead.
+            if (tier) {
+              setPhase('error');
+              setError('No opponent found at this table yet. Try again or pick another table.');
+              return null;
+            }
             setPhase('fallback');
             const { matchId } = await p.games.findOrCreateChessMatch({
               timeControl: p.timeControl,

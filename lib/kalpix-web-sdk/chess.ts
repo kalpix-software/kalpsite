@@ -14,6 +14,13 @@ export const ChessOp = {
   GameOver:     11,
   DrawOffered:  12,
   Illegal:      13,
+  /**
+   * Per-player end-of-match frame (coins, XP, level, rating, quest notices).
+   * Targeted at ONE player — never part of the broadcast state, because
+   * `get_state` returns the shared state verbatim to any caller and the 1 Hz
+   * poll would clobber it anyway. Keep it in its own client state slot.
+   */
+  Result:       14,
 } as const;
 
 export type ChessSide = 'white' | 'black';
@@ -54,6 +61,15 @@ export interface ChessCosmeticsWire {
   backgroundUrl?: string;
   boardSlug?: string;
   pieceSetSlug?: string;
+  /**
+   * Account-level display preference. When false, the opponent's pieces are
+   * rendered in THIS user's set instead of theirs.
+   *
+   * Client-enforced by design: the opponent's set still arrives in match
+   * state, the client simply declines to use it. Nothing is hidden from the
+   * wire, so this is a preference, not a privacy control.
+   */
+  showOpponentCosmetics?: boolean;
 }
 
 /** The twelve sprite names every piece set must provide, as FEN letters. */
@@ -89,6 +105,49 @@ export interface ChessStateWire {
   reason?: string;
   drawOfferedBy?: ChessSide | '';
   players: ChessPlayerWire[];
+  /**
+   * Shared stake info — what the table is worth. Safe to broadcast; per-player
+   * money (balance, winnings) rides ChessResultWire instead.
+   */
+  entryFee?: number;
+  tier?: string;
+  prizePool?: number;
+}
+
+/**
+ * Private end-of-match summary for the receiving player only (op 14).
+ * Mirrors `chessResultWire` in src/chess_game.go.
+ *
+ * Money fields are zero until the entry-fee economy ships; the shape is stable
+ * so the overlay doesn't change when they start arriving.
+ */
+export interface ChessResultWire {
+  result: string;                 // "1-0" | "0-1" | "1/2-1/2"
+  reason?: string;
+  won: boolean;
+  drawn: boolean;
+
+  entryFee: number;
+  coinsWon: number;
+  coinDelta: number;
+  newBalance: number;
+
+  xpAwarded: number;
+  level?: number;
+  leveledUp: boolean;
+  zone?: string;
+  totalXp?: number;
+  xpIntoLevel?: number;
+  xpForNextLevel?: number;
+
+  rated: boolean;
+  ratingBefore?: number;
+  ratingAfter?: number;
+  ratingDelta?: number;
+  provisional?: boolean;
+  ratingRank?: number;
+
+  questNotices?: string[];
 }
 
 export interface ChessMovePayload {

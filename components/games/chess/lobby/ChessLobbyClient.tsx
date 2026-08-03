@@ -21,6 +21,7 @@ import RulesTab from './RulesTab';
 import UpgradesTab from './UpgradesTab';
 import CreatePrivateDialog from './CreatePrivateDialog';
 import MatchmakingDialog from './MatchmakingDialog';
+import TierPickerDialog from './TierPickerDialog';
 import ActiveMatchBar from './ActiveMatchBar';
 
 // Host is resolved at runtime (URL query → sessionStorage → env) so the
@@ -55,6 +56,9 @@ export default function ChessLobbyClient() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [mmTimeControl, setMmTimeControl] = useState<'blitz' | 'rapid' | null>(null);
+  // Time control awaiting a stake choice, and the stake once chosen.
+  const [tierPickFor, setTierPickFor] = useState<'blitz' | 'rapid' | null>(null);
+  const [mmTier, setMmTier] = useState<string>('');
 
   const clientRef = useRef<KalpixClient | null>(null);
   const gamesRef = useRef<GameApi | null>(null);
@@ -136,8 +140,18 @@ export default function ChessLobbyClient() {
     [ratingInfo, rating],
   );
 
+  // Tapping a queue now opens the table picker first; matchmaking starts once
+  // a stake is chosen, so the tier is known before any ticket is enqueued.
   const startMatchmaking = useCallback((q: QueueMode) => {
-    setMmTimeControl(q.key);
+    setTierPickFor(q.key);
+  }, []);
+
+  const onTierPicked = useCallback((tier: string) => {
+    setMmTier(tier);
+    setTierPickFor((tc) => {
+      setMmTimeControl(tc);
+      return null;
+    });
   }, []);
 
   const onMatchReady = useCallback(
@@ -217,6 +231,16 @@ export default function ChessLobbyClient() {
         />
       )}
 
+      {tierPickFor && (
+        <TierPickerDialog
+          games={games}
+          timeControl={tierPickFor}
+          level={stats.level}
+          onPick={onTierPicked}
+          onClose={() => setTierPickFor(null)}
+        />
+      )}
+
       {mmTimeControl && clientRef.current && (
         <MatchmakingDialog
           client={clientRef.current}
@@ -224,6 +248,7 @@ export default function ChessLobbyClient() {
           timeControl={mmTimeControl}
           rating={rating}
           provisional={ratingInfo?.provisional ?? true}
+          tier={mmTier}
           onClose={() => setMmTimeControl(null)}
           onMatchReady={onMatchReady}
         />

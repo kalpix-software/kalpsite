@@ -1,9 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, Coins, Gem, Loader2, Sparkles } from 'lucide-react';
+import { Check, Loader2, Sparkles } from 'lucide-react';
 
-import type { GameApi, GamePreferences, GameSubcategory, StoreItem } from '@/lib/kalpix-web-sdk/games';
+import type { GameApi, GameSubcategory, StoreItem } from '@/lib/kalpix-web-sdk/games';
 import { lobbyTheme } from '@/components/games/shell/theme';
 
 // Chess upgrades — the in-game mirror of Tero's customize sheet.
@@ -14,51 +14,57 @@ import { lobbyTheme } from '@/components/games/shell/theme';
 // change, and the labels resolve server-side (so "background" reads
 // "Backgrounds" for chess but "Table Themes" for Tero).
 //
-// Equipped state comes from game/get_preferences, not the catalog's isEquipped
-// flag — store/get_items does not populate that field.
+// Equipped state rides on the catalog rows themselves: store/get_items sets
+// isEquipped per item from GetAllEquippedItemIDs, which covers the chess board
+// and piece-set slots. So equipping only needs a re-read of the current tab,
+// not a separate preferences call.
 
 const GAME_ID = 'chess';
 
-/** Maps a subcategory key to the preferences field holding its equipped item. */
-const SLOT_FIELD: Record<string, keyof GamePreferences> = {
-  board: 'equippedBoardId',
-  pieces: 'equippedPieceSetId',
-  background: 'equippedBackgroundId',
-};
-
 type Busy = { itemId: string; action: 'equip' | 'buy' } | null;
 
-export default function UpgradesTab({ games }: { games: GameApi }) {
+export default function UpgradesTab({
+  games,
+  onEquipped,
+}: {
+  games: GameApi;
+  /**
+   * Fired after a successful equip. The in-match Customize sheet uses it to
+   * apply the change to a live game; the lobby has nothing to do and omits it.
+   */
+  onEquipped?: (subcategory: string, item: StoreItem) => void | Promise<void>;
+}) {
   const [subcategories, setSubcategories] = useState<GameSubcategory[] | null>(null);
   const [active, setActive] = useState<string | null>(null);
   const [items, setItems] = useState<StoreItem[] | null>(null);
-  const [prefs, setPrefs] = useState<GamePreferences | null>(null);
   const [ownedOnly, setOwnedOnly] = useState(false);
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // Sub-tabs + equipped state. Loaded once.
+  // Sub-tabs. Loaded once.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const [catalog, preferences] = await Promise.all([
-          games.getCatalog(),
-          games.getPreferences(GAME_ID).catch(() => null),
-        ]);
+    games
+      .getCatalog()
+      .then((catalog) => {
         if (cancelled) return;
         const chess = catalog.games?.find((g) => g.gameId === GAME_ID);
         const subs = chess?.subcategories ?? [];
         setSubcategories(subs);
         setActive((cur) => cur ?? subs[0]?.key ?? null);
-        setPrefs(preferences);
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      }
-    })();
+      })
+      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); });
     return () => { cancelled = true; };
   }, [games]);
+
+  const loadItems = useCallback(
+    async (subcategory: string) => {
+      const r = await games.getStoreItems({ gameId: GAME_ID, subcategory });
+      setItems(r.items ?? []);
+    },
+    [games],
+  );
 
   // Items for the active sub-tab.
   useEffect(() => {
@@ -72,20 +78,6 @@ export default function UpgradesTab({ games }: { games: GameApi }) {
     return () => { cancelled = true; };
   }, [games, active]);
 
-  const equippedItemId = useMemo(() => {
-    if (!active || !prefs) return null;
-    const field = SLOT_FIELD[active];
-    return field ? (prefs[field] as string | undefined) ?? null : null;
-  }, [active, prefs]);
-
-  const refreshPrefs = useCallback(async () => {
-    try {
-      setPrefs(await games.getPreferences(GAME_ID));
-    } catch {
-      // Non-fatal: the badge just stays stale until the next load.
-    }
-  }, [games]);
-
   const flash = useCallback((msg: string) => {
     setNotice(msg);
     window.setTimeout(() => setNotice(null), 2200);
@@ -96,8 +88,10 @@ export default function UpgradesTab({ games }: { games: GameApi }) {
       setBusy({ itemId: item.itemId, action: 'equip' });
       setError(null);
       try {
-        const next = await games.applyCosmetic({ gameId: GAME_ID, itemId: item.itemId });
-        setPrefs(next);
+        await games.applyCosmetic({ gameId: GAME_ID, itemId: item.itemId });
+        // Re-read so isEquipped moves off the previous item in this slot.
+        if (active) await loadItems(active);
+        if (active) await onEquipped?.(active, item);
         flash(`${item.name} equipped`);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -105,7 +99,7 @@ export default function UpgradesTab({ games }: { games: GameApi }) {
         setBusy(null);
       }
     },
-    [games, flash],
+    [games, active, loadItems, flash, onEquipped],
   );
 
   const onBuy = useCallback(
@@ -121,12 +115,9 @@ export default function UpgradesTab({ games }: { games: GameApi }) {
           return;
         }
         await games.commitBuyAndApply({ gameId: GAME_ID, itemId: item.itemId });
-        // Re-read both: the item is now owned and occupies its slot.
-        const [refreshed] = await Promise.all([
-          games.getStoreItems({ gameId: GAME_ID, subcategory: active ?? '' }),
-          refreshPrefs(),
-        ]);
-        setItems(refreshed.items ?? []);
+        // Re-read: the item is now both owned and equipped.
+        if (active) await loadItems(active);
+        if (active) await onEquipped?.(active, item);
         flash(`${item.name} purchased and equipped`);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -134,7 +125,7 @@ export default function UpgradesTab({ games }: { games: GameApi }) {
         setBusy(null);
       }
     },
-    [games, active, refreshPrefs, flash],
+    [games, active, loadItems, flash, onEquipped],
   );
 
   const visible = useMemo(() => {
@@ -219,7 +210,7 @@ export default function UpgradesTab({ games }: { games: GameApi }) {
             <ItemCard
               key={item.itemId}
               item={item}
-              equipped={item.itemId === equippedItemId}
+              equipped={item.isEquipped}
               busy={busy?.itemId === item.itemId ? busy.action : null}
               onEquip={() => onEquip(item)}
               onBuy={() => onBuy(item)}
@@ -231,6 +222,15 @@ export default function UpgradesTab({ games }: { games: GameApi }) {
   );
 }
 
+/**
+ * Item card, mirroring plazy's StoreItemCard so the webview shop reads as the
+ * same product as Tero's: preview art, an Owned ribbon, a discount badge, and
+ * a price footer showing the currency icon with the original struck through.
+ *
+ * Backgrounds fill the frame (`cover`) while boards and piece sets are
+ * letterboxed (`contain`) — the same split StoreItemCard makes via
+ * `item.isBackground`.
+ */
 function ItemCard({
   item, equipped, busy, onEquip, onBuy,
 }: {
@@ -240,30 +240,56 @@ function ItemCard({
   onEquip(): void;
   onBuy(): void;
 }) {
-  const coins = item.price?.coins ?? item.priceCoins ?? 0;
-  const gems = item.price?.gems ?? 0;
-  const art = item.previewUrl || item.iconUrl;
+  const isGems = item.currencyType?.toLowerCase() === 'gems';
+  const hasDiscount =
+    typeof item.discountedPrice === 'number' &&
+    item.discountedPrice > 0 &&
+    item.discountedPrice < item.price;
+  const effectivePrice = hasDiscount ? item.discountedPrice! : item.price;
+  const isFree = effectivePrice <= 0;
+  const cover = item.subcategory === 'background';
 
   return (
     <div
-      className="overflow-hidden rounded-xl"
+      className="relative overflow-hidden rounded-xl"
       style={{
         background: lobbyTheme.card,
         border: `1px solid ${equipped ? lobbyTheme.primaryBorder : lobbyTheme.divider}`,
       }}
     >
       <div className="relative grid aspect-square place-items-center" style={{ background: lobbyTheme.cardSoft }}>
-        {art ? (
+        {item.previewUrl ? (
           // Plain <img>: the R2 host isn't in next.config images.remotePatterns
           // and these are already sized for display.
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={art} alt={item.name} className="h-full w-full object-contain p-2" />
+          <img
+            src={item.previewUrl}
+            alt={item.name}
+            className={`h-full w-full ${cover ? 'object-cover' : 'object-contain p-2'}`}
+          />
         ) : (
           <Sparkles className="h-7 w-7" style={{ color: lobbyTheme.textDim }} />
         )}
+
+        {item.isOwned && (
+          <div
+            className="absolute left-0 top-1.5 rounded-r-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+            style={{ background: lobbyTheme.success, color: '#fff' }}
+          >
+            Owned
+          </div>
+        )}
+        {hasDiscount && (
+          <div
+            className="absolute right-1.5 top-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold"
+            style={{ background: lobbyTheme.accentRed, color: '#fff' }}
+          >
+            -{item.discountedPercent ?? Math.round((1 - effectivePrice / item.price) * 100)}%
+          </div>
+        )}
         {equipped && (
           <div
-            className="absolute right-1.5 top-1.5 flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+            className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 py-1 text-[10px] font-semibold"
             style={{ background: lobbyTheme.primary, color: '#fff' }}
           >
             <Check className="h-3 w-3" /> Equipped
@@ -275,6 +301,35 @@ function ItemCard({
         <div className="truncate text-sm font-medium" style={{ color: lobbyTheme.text }} title={item.name}>
           {item.name}
         </div>
+
+        {/* Price footer — hidden once owned, since it is no longer actionable. */}
+        {!item.isOwned && (
+          <div className="flex items-center justify-center gap-1.5">
+            {isFree ? (
+              <span className="text-sm font-extrabold" style={{ color: lobbyTheme.text }}>Free</span>
+            ) : (
+              <>
+                {/* Same artwork plazy uses (AppAssets.coins / .gems), copied
+                    into public/icons so the webview price row is identical to
+                    the native shop rather than an icon-font lookalike. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={isGems ? '/icons/gems.webp' : '/icons/coin.webp'}
+                  alt={isGems ? 'gems' : 'coins'}
+                  className="h-[18px] w-[18px] object-contain"
+                />
+                <span className="text-sm font-extrabold" style={{ color: lobbyTheme.text }}>
+                  {effectivePrice}
+                </span>
+                {hasDiscount && (
+                  <span className="text-xs font-bold line-through" style={{ color: lobbyTheme.textDim }}>
+                    {item.price}
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+        )}
 
         {item.isOwned ? (
           <button
@@ -297,13 +352,8 @@ function ItemCard({
             className="flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition disabled:opacity-60"
             style={{ background: lobbyTheme.primary, color: '#fff' }}
           >
-            {busy === 'buy' ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : gems > 0 ? (
-              <><Gem className="h-3.5 w-3.5" /> {gems}</>
-            ) : (
-              <><Coins className="h-3.5 w-3.5" /> {coins}</>
-            )}
+            {busy === 'buy' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {isFree ? 'Get' : 'Buy & Apply'}
           </button>
         )}
       </div>

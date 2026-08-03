@@ -1,8 +1,20 @@
 'use client';
 
 import Image from 'next/image';
-import { Star } from 'lucide-react';
+import { ChevronLeft, Star } from 'lucide-react';
 import { lobbyTheme } from '@/components/games/shell/theme';
+
+/**
+ * Ask the Flutter host to close the webview. No-op in a plain browser, where
+ * the KalpixNative channel is absent.
+ */
+function closeWebview() {
+  if (typeof window === 'undefined') return;
+  const native = (window as unknown as {
+    KalpixNative?: { postMessage: (msg: string) => void };
+  }).KalpixNative;
+  native?.postMessage?.(JSON.stringify({ action: 'close_webview' }));
+}
 
 export interface LobbyHeaderProps {
   title: string;
@@ -46,7 +58,19 @@ export default function LobbyHeader(p: LobbyHeaderProps) {
 
       {/* Title */}
       <div className="absolute left-5 right-5 top-5 flex items-center justify-between text-white">
-        <div className="text-2xl font-semibold tracking-wide">{p.title}</div>
+        <div className="flex items-center gap-2">
+          {/* The native host draws no title bar for webview games, so this is
+              the only way out on iOS (which has no system back button). */}
+          <button
+            type="button"
+            aria-label="Leave game"
+            onClick={closeWebview}
+            className="-ml-1 grid h-9 w-9 place-items-center rounded-full bg-black/35 backdrop-blur transition hover:bg-black/55"
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </button>
+          <div className="text-2xl font-semibold tracking-wide">{p.title}</div>
+        </div>
         <div className="text-xs text-white/60">
           {p.gamesPlayed} games · {p.gamesWon}W / {p.gamesLost}L
           {p.gamesDrawn > 0 && ` / ${p.gamesDrawn}D`}

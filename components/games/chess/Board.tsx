@@ -394,7 +394,9 @@ export default function Board(props: BoardProps) {
   return (
     <div
       ref={containerRef}
-      className="kalpix-chess-board relative mx-auto aspect-square w-full max-w-[min(100vh,100vw)] select-none overflow-hidden rounded-md"
+      // max-h-full pairs with aspect-square so the board shrinks to fit the
+      // height its parent leaves, rather than overflowing a fixed-height page.
+      className="kalpix-chess-board relative mx-auto aspect-square w-full max-h-full max-w-full select-none overflow-hidden rounded-md"
       style={{ ...boardStyle, touchAction: 'none' }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

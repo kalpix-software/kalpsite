@@ -17,9 +17,11 @@ import {
   type ChessCosmeticsWire,
   type ChessIllegalPayload,
   type ChessPlayerWire,
+  type ChessResultWire,
   type ChessSide,
   type ChessStateWire,
 } from '@/lib/kalpix-web-sdk/chess';
+import { GameApi } from '@/lib/kalpix-web-sdk/games';
 import { useNativeBack } from '@/hooks/useNativeBack';
 
 import {
@@ -34,8 +36,8 @@ import {
 import Board from './Board';
 import Clock from './Clock';
 import PromotionPicker from './PromotionPicker';
-import MoveList from './MoveList';
 import ChatPanel from './ChatPanel';
+import CosmeticsSheet from './CosmeticsSheet';
 
 // Host is resolved at runtime (URL query → sessionStorage → env) so the
 // same kalpsite build can serve both a real device on the LAN and an
@@ -115,6 +117,18 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
   // Timestamp of the last server move rejection. Only meaningful as a change
   // signal — the board watches it to drop its optimistic piece placement.
   const [rejectedAt, setRejectedAt] = useState(0);
+
+  // This player's private end-of-match summary (op 14). Kept in its own slot,
+  // never merged into `state`, because the shared state is overwritten by
+  // every broadcast and by the 1 Hz get_state poll. Replayed by the server on
+  // rejoin, so a player who dropped at mate still receives it.
+  const [result, setResult] = useState<ChessResultWire | null>(null);
+
+  // In-match Customize sheet.
+  const [customizeOpen, setCustomizeOpen] = useState(false);
+  // Built lazily from the live client; memoised so opening the sheet
+  // doesn't remount UpgradesTab (which would refetch on every render).
+  const gamesApiRef = useRef<GameApi | null>(null);
 
   const bumpDebug = useCallback((patch: Partial<DebugInfo>) => {
     setDebug((d) => ({ ...d, ...patch }));
@@ -294,6 +308,13 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
         flashToast(`${by === 'white' ? 'White' : 'Black'} offered a draw`);
         return;
       }
+      case ChessOp.Result: {
+        // Deliberately NOT routed through applyAuthoritativeState: this frame
+        // is private to this player and would be wiped by the next shared
+        // state broadcast or the 1 Hz get_state poll.
+        setResult(decodeChessJson<ChessResultWire>(data));
+        return;
+      }
       case ChatOp.Text:
       case ChatOp.Quick: {
         const entry = decodeChat<ChatEntry>(data);
@@ -341,14 +362,24 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
   // Piece sets are per-SIDE, not per-viewer: each player's own set paints
   // their sixteen pieces on both screens. Resolve by side rather than by
   // "me / opponent" so spectators see the same board the players do.
-  const whitePieceSet = useMemo(
-    () => state?.players.find((p) => p.side === 'white')?.pieceSetBaseUrl,
-    [state],
+  //
+  // Unless the viewer has turned showOpponentCosmetics off, in which case the
+  // opponent's side is overridden with the viewer's own set. Spectators are
+  // unaffected — with no side of their own there is nothing to substitute.
+  const showOpponent = cosmetics?.showOpponentCosmetics !== false;
+  const myPieceSet = cosmetics?.pieceSetBaseUrl;
+
+  const setForSide = useCallback(
+    (side: ChessSide) => {
+      const owner = state?.players.find((p) => p.side === side)?.pieceSetBaseUrl;
+      if (showOpponent || mySide === null || side === mySide) return owner;
+      return myPieceSet ?? owner;
+    },
+    [state, showOpponent, mySide, myPieceSet],
   );
-  const blackPieceSet = useMemo(
-    () => state?.players.find((p) => p.side === 'black')?.pieceSetBaseUrl,
-    [state],
-  );
+
+  const whitePieceSet = useMemo(() => setForSide('white'), [setForSide]);
+  const blackPieceSet = useMemo(() => setForSide('black'), [setForSide]);
 
   const interactive = !!(state?.gameStarted && !state?.gameEnded && mySide);
 
@@ -360,6 +391,18 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
     },
     [],
   );
+
+  // Board and background are per-viewer, so an equip only needs a re-read of
+  // this client's own cosmetics — the match never hears about it.
+  const reloadViewerCosmetics = useCallback(async () => {
+    const client = clientRef.current;
+    if (!client) return;
+    try {
+      setCosmetics(await client.http.call<ChessCosmeticsWire>('get_chess_cosmetics', {}));
+    } catch {
+      // Keep the current art rather than blanking the board.
+    }
+  }, []);
 
   const sendResign = useCallback(() => {
     sessionRef.current?.send(ChessOp.Resign, encodeChessJson({}));
@@ -395,7 +438,10 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
 
   return (
     <div
-      className="relative flex min-h-dvh flex-col bg-zinc-950 bg-cover bg-center text-white pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
+      // h-dvh + overflow-hidden, not min-h-dvh: the table is a fixed one-screen
+      // playfield like Tero's, so nothing may push the page into a scroll. The
+      // board flexes into whatever height the header and footer leave.
+      className="relative flex h-dvh flex-col overflow-hidden bg-zinc-950 bg-cover bg-center text-white pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
       // Surface behind the board. Per-viewer like the board itself; the
       // zinc-950 class stays as the fallback when nothing is equipped.
       style={cosmetics?.backgroundUrl ? { backgroundImage: `url(${cosmetics.backgroundUrl})` } : undefined}
@@ -432,8 +478,10 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
         </div>
       </header>
 
-      {/* Board */}
-      <div className="relative flex-1 px-2 py-2">
+      {/* Board — min-h-0 lets this flex child shrink below its content size,
+          which is what allows the square to be capped by available height
+          instead of overflowing the fixed-height page. */}
+      <div className="relative flex min-h-0 flex-1 items-center justify-center px-2 py-2">
         <Board
           fen={state.fen}
           orientation={orientation}
@@ -451,6 +499,7 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
         {pendingPromo && mySide && (
           <PromotionPicker
             side={mySide}
+            pieceSetBaseUrl={mySide === 'white' ? whitePieceSet : blackPieceSet}
             onPick={(piece) => {
               sendMove(pendingPromo.from, pendingPromo.to, piece);
               setPendingPromo(null);
@@ -487,6 +536,9 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
           >
             Resign
           </ActionButton>
+          <ActionButton onClick={() => setCustomizeOpen(true)}>
+            Customize
+          </ActionButton>
           {drawIncoming ? (
             <>
               <ActionButton onClick={() => sendRespondDraw(true)}>
@@ -506,8 +558,6 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
           )}
         </div>
 
-        <MoveList pgn={state.pgn} />
-
         <ChatPanel
           messages={chat}
           myUserId={myUserIdRef.current}
@@ -516,10 +566,20 @@ export default function ChessMatchClient({ matchId }: { matchId: string }) {
         />
       </footer>
 
+      {customizeOpen && (
+        <CosmeticsSheet
+          games={(gamesApiRef.current ??= new GameApi(clientRef.current!.http))}
+          matchId={matchId}
+          onViewerCosmeticsChanged={reloadViewerCosmetics}
+          onClose={() => setCustomizeOpen(false)}
+        />
+      )}
+
       {state.gameEnded && (
         <ResultOverlay
           state={state}
           mySide={mySide}
+          result={result}
           onClose={() => router.replace('/games/chess/lobby')}
         />
       )}
@@ -688,10 +748,13 @@ function ActionButton({
 function ResultOverlay({
   state,
   mySide,
+  result,
   onClose,
 }: {
   state: ChessStateWire;
   mySide: ChessSide | null;
+  /** Private summary (op 14). Null until it arrives, or forever if it fails. */
+  result: ChessResultWire | null;
   onClose: () => void;
 }) {
   const headline =
@@ -704,33 +767,96 @@ function ResultOverlay({
       ? 'You lose'
       : (state.result ?? 'Game over');
 
-  // Auto-return to lobby after a few seconds so resign / draw / mate all
-  // unwind back to the lobby without requiring a tap. The button is still
-  // available for users who want to dismiss faster.
+  // The auto-close countdown must NOT start until the private result frame
+  // lands — it arrives a moment after the game-over state, and a timer started
+  // on game-over could dismiss the overlay before the player ever sees their
+  // XP, rating or coins. Spectators (no side) and a frame that never arrives
+  // fall back to a short grace so the overlay can't hang forever.
+  const waiting = result === null && mySide !== null;
+  const [graceExpired, setGraceExpired] = useState(false);
+  useEffect(() => {
+    if (!waiting) return;
+    const t = setTimeout(() => setGraceExpired(true), 4000);
+    return () => clearTimeout(t);
+  }, [waiting]);
+
+  const countdownActive = !waiting || graceExpired;
   const [secs, setSecs] = useState(5);
   useEffect(() => {
+    if (!countdownActive) return;
     if (secs <= 0) {
       onClose();
       return;
     }
     const t = setTimeout(() => setSecs((s) => s - 1), 1000);
     return () => clearTimeout(t);
-  }, [secs, onClose]);
+  }, [countdownActive, secs, onClose]);
+
+  const ratingDelta = result?.ratingDelta ?? 0;
 
   return (
-    <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/70">
-      <div className="rounded-lg bg-zinc-900 p-6 text-center shadow-2xl">
+    <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/70 p-6">
+      <div className="w-full max-w-xs rounded-lg bg-zinc-900 p-6 text-center shadow-2xl">
         <div className="text-3xl font-semibold">{headline}</div>
         <div className="mt-2 text-sm text-white/60">
           {state.reason ?? state.result}
         </div>
+
+        {result && (
+          <div className="mt-5 flex flex-col gap-2 text-sm">
+            {/* Coins — hidden entirely on a free match rather than showing 0. */}
+            {(result.coinDelta !== 0 || result.entryFee > 0) && (
+              <ResultRow
+                label="Coins"
+                value={`${result.coinDelta > 0 ? '+' : ''}${result.coinDelta}`}
+                tone={result.coinDelta > 0 ? 'good' : result.coinDelta < 0 ? 'bad' : 'flat'}
+              />
+            )}
+            {result.xpAwarded > 0 && (
+              <ResultRow label="XP" value={`+${result.xpAwarded}`} tone="good" />
+            )}
+            {result.leveledUp && result.level ? (
+              <ResultRow label="Level up" value={`${result.level}`} tone="good" />
+            ) : null}
+            {result.rated && result.ratingAfter ? (
+              <ResultRow
+                label="Rating"
+                value={`${result.ratingAfter} (${ratingDelta > 0 ? '+' : ''}${ratingDelta})`}
+                tone={ratingDelta > 0 ? 'good' : ratingDelta < 0 ? 'bad' : 'flat'}
+              />
+            ) : null}
+            {result.questNotices?.map((n) => (
+              <div key={n} className="text-xs text-emerald-300">{n}</div>
+            ))}
+          </div>
+        )}
+
         <button
           onClick={onClose}
-          className="mt-6 rounded-md bg-white/10 px-6 py-2 text-sm font-medium hover:bg-white/20"
+          className="mt-6 w-full rounded-md bg-white/10 px-6 py-2 text-sm font-medium hover:bg-white/20"
         >
-          Back to lobby ({secs})
+          {countdownActive ? `Back to lobby (${secs})` : 'Back to lobby'}
         </button>
       </div>
+    </div>
+  );
+}
+
+function ResultRow({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: 'good' | 'bad' | 'flat';
+}) {
+  const color =
+    tone === 'good' ? 'text-emerald-400' : tone === 'bad' ? 'text-red-400' : 'text-white/70';
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-white/50">{label}</span>
+      <span className={`font-semibold ${color}`}>{value}</span>
     </div>
   );
 }

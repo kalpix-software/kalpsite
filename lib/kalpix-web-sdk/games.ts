@@ -17,6 +17,32 @@ export interface GameSubcategory {
   name: string;
 }
 
+/** One payout slot within a tier's prize breakdown. */
+export interface PrizePlace {
+  place: number;
+  coins: number;
+}
+
+export interface ModePrizes {
+  totalPool: number;
+  afterRake: number;
+  perWinner?: number;
+  payouts: PrizePlace[];
+}
+
+/** One entry-fee bracket as delivered inside game/get_catalog metadata. */
+export interface TierPrizes {
+  tier: string;
+  entryFee: number;
+  levelUnlock: number;
+  prizesByMode: Record<string, ModePrizes>;
+}
+
+export interface EntryTiersResponse {
+  rake: number;
+  tiers: TierPrizes[];
+}
+
 export interface GameCatalogItem {
   gameId: string;
   name: string;
@@ -37,6 +63,8 @@ export interface GameCatalogItem {
     turnTimer?: number;
     clientType?: 'native' | 'webview';
     webviewUrl?: string;
+    /** Entry-fee tiers, embedded here rather than a separate RPC. */
+    entryTiers?: EntryTiersResponse;
   };
   createdAt: number;
   updatedAt: number;
@@ -121,19 +149,83 @@ export interface GameStatsResponse {
   winRate: number;
 }
 
+/**
+ * One catalog row as the CLIENT sees it (models.StoreItemResponse).
+ *
+ * Note this is not the admin shape: store/get_items only returns raw
+ * models.StoreItem when includeInactive is set, which is admin-gated. The
+ * difference matters most for price — here it is a single amount plus a
+ * currencyType, not a {coins, gems} pair.
+ */
 export interface StoreItem {
   itemId: string;
-  slug?: string;
   name: string;
+  description?: string;
+  upgradeType?: string;
+  category: string;
   subcategory: string;
-  iconUrl: string;
-  previewUrl?: string;
-  price?: { coins?: number; gems?: number };
-  priceCoins: number;
-  priceCurrency?: string;
+  previewUrl: string;
+  mediaType?: string;
+  assetUrl?: string;
+  /** "coins" | "gems" — which wallet `price` is denominated in. */
+  currencyType: string;
+  price: number;
+  /** Present only when a discount is active. */
+  discountedPrice?: number;
+  discountedPercent?: number;
+  purchaseLimit?: number;
+  quantityAvailable?: number;
+  quantityAddedToCart?: number;
   isOwned: boolean;
   isEquipped: boolean;
-  metadata?: Record<string, string>;
+}
+
+/** One seat in a chess replay. */
+export interface ChessReplayPlayer {
+  userId: string;
+  username?: string;
+  avatarUrl?: string;
+  isBot?: boolean;
+  rating?: number;
+  pieceSetBaseUrl?: string;
+}
+
+/**
+ * A finished chess game, complete enough to scrub through offline.
+ *
+ * `moves` are UCI from the start position — unambiguous without board context,
+ * so the client replays them by applying one at a time. `result` is
+ * authoritative from the game state, NOT parsed from the PGN tail (a
+ * resignation or timeout leaves that as "*").
+ */
+export interface ChessReplayWire {
+  pgn: string;
+  moves: string[];
+  finalFen: string;
+  result: string;
+  reason?: string;
+  timeControl?: string;
+  whiteMs: number;
+  blackMs: number;
+  white?: ChessReplayPlayer;
+  black?: ChessReplayPlayer;
+  entryFee?: number;
+  tier?: string;
+}
+
+export interface MatchReplayResponse {
+  available: boolean;
+  matchId: string;
+  gameSlug?: string;
+  gameMode?: string;
+  result?: string;
+  completedAt?: number;
+  duration?: number;
+  players?: Array<{ userId: string; username?: string; displayName?: string; avatarUrl?: string; isBot?: boolean }>;
+  winner?: { userId: string; username?: string; displayName?: string; avatarUrl?: string; isBot?: boolean };
+  chatLog?: Array<{ seq: number; senderId: string; username?: string; kind: string; text?: string; quickCode?: number; tsMs: number }>;
+  coinDelta?: number;
+  chess?: ChessReplayWire;
 }
 
 /** Equipped cosmetic slots for one (user, game). Null = bundled default. */
@@ -146,6 +238,14 @@ export interface GamePreferences {
   equippedPieceSetId?: string;
   updatedAt?: number;
 }
+
+/**
+ * Buy-and-equip in one transaction. Registered under the `game_upgrade/`
+ * namespace, NOT `game/` like the other cosmetic RPCs — see main.go. The
+ * doc comment in services/game/buy_and_apply.go calls it
+ * "game/buy_and_apply_cosmetic", which is not a registered name.
+ */
+const BUY_AND_APPLY_RPC = 'game_upgrade/buy_and_apply';
 
 export class GameApi {
   constructor(private http: KalpixHttp) {}
@@ -208,6 +308,30 @@ export class GameApi {
     });
   }
 
+  /**
+   * The caller's record of one finished match, including the chess move list.
+   *
+   * `available: false` is a normal outcome, not an error — match_history keeps
+   * only the most recent matches per game, so replay links expire by design.
+   */
+  getMatchReplay(matchId: string): Promise<MatchReplayResponse> {
+    return this.http.call<MatchReplayResponse>('game/get_match_replay', { matchId });
+  }
+
+  /**
+   * Ask a live match to re-read this player's equipped cosmetics.
+   *
+   * MUST go over HTTP, never `session.signal()`: MatchSignal carries no caller
+   * identity, so a socket signal lets the sender name any userId — which would
+   * let a player burn their OPPONENT's swap allowance. This RPC stamps the
+   * user from the authenticated session instead.
+   *
+   * The RPC is match-module agnostic despite living in tero_game.go.
+   */
+  refreshMatchCosmetics(matchId: string): Promise<unknown> {
+    return this.http.call('refresh_match_cosmetics', { matchId });
+  }
+
   /** Currently equipped cosmetics for a game. */
   getPreferences(gameId: string): Promise<GamePreferences> {
     return this.http.call<GamePreferences>('game/get_preferences', { gameId });
@@ -239,7 +363,7 @@ export class GameApi {
     balance?: number;
     canAfford?: boolean;
   }> {
-    return this.http.call('game/buy_and_apply_cosmetic', { ...args, quote: true });
+    return this.http.call(BUY_AND_APPLY_RPC, { ...args, quote: true });
   }
 
   /** Purchase and equip in one transaction. */
@@ -248,7 +372,7 @@ export class GameApi {
     itemId: string;
     idempotencyKey?: string;
   }): Promise<{ success?: boolean; message?: string }> {
-    return this.http.call('game/buy_and_apply_cosmetic', { ...args, quote: false });
+    return this.http.call(BUY_AND_APPLY_RPC, { ...args, quote: false });
   }
 
   // ── Chess-specific RPCs (mirrors src/chess_game.go) ─────────────────────
@@ -265,8 +389,19 @@ export class GameApi {
     timeControl: 'blitz' | 'rapid';
     rated?: boolean;
     allowBot?: boolean;
+    /** Entry-fee bracket; omit or empty for a free table. */
+    tier?: string;
   }): Promise<{ matchId: string; message: string }> {
     return this.http.call('find_or_create_chess_match', args);
+  }
+
+  /**
+   * The caller's wallet. Needed by the tier picker to grey out tables the
+   * player can't afford — the server rejects them anyway, but failing at the
+   * button is a worse experience than never offering it.
+   */
+  getWallet(): Promise<{ coins: number; gems: number }> {
+    return this.http.call<{ coins: number; gems: number }>('store/get_wallet', {});
   }
 
   addBotToChessMatch(args: {
