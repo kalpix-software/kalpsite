@@ -109,11 +109,17 @@ export default function AdminBackgroundsPage() {
   const [defaultSel, setDefaultSel] = useState<Record<string, string>>({});
   const [settingDefault, setSettingDefault] = useState('');
 
-  const loadAvatars = useCallback(async () => {
+  // syncDefaultsForSlug re-reads that avatar's stored defaults too — a save can seed
+  // default_selection server-side, which would otherwise leave the stars stale.
+  const loadAvatars = useCallback(async (syncDefaultsForSlug?: string) => {
     try {
       const raw = await callRpc('avatar/admin_list_avatars', '{}');
       const data = unwrapAdminRpcData<{ avatars?: AvatarListItem[] }>(raw);
-      setAvatars(data.avatars ?? []);
+      const list = data.avatars ?? [];
+      setAvatars(list);
+      if (syncDefaultsForSlug) {
+        setDefaultSel(list.find((a) => a.slug === syncDefaultsForSlug)?.defaultSelection ?? {});
+      }
     } catch (e) {
       setSave({ loading: false, error: e instanceof Error ? e.message : 'Failed to load avatars' });
     }
@@ -162,13 +168,25 @@ export default function AdminBackgroundsPage() {
     loadExistingBackgrounds(newSlug);
   };
 
-  // Mark a background option as the avatar's default (seeds new users' currentSelection).
-  const setDefaultBackground = async (subcategoryKey: string, optionId: string) => {
+  // Mark a background option as the avatar's default (seeds new users' currentSelection and
+  // is what the app shows behind a character with no background of its own). Clicking the
+  // current default again clears it, leaving the avatar with no default background.
+  const toggleDefaultBackground = async (subcategoryKey: string, optionId: string) => {
     if (!slug || !optionId) return;
+    const isDefault = defaultSel[subcategoryKey] === optionId;
     setSettingDefault(`${subcategoryKey}/${optionId}`);
     try {
-      await callRpc('avatar/admin_set_default_option', JSON.stringify({ slug, subcategoryKey, optionId }));
-      setDefaultSel((prev) => ({ ...prev, [subcategoryKey]: optionId }));
+      await callRpc('avatar/admin_set_default_option', JSON.stringify({
+        slug,
+        subcategoryKey,
+        optionId: isDefault ? '' : optionId,
+      }));
+      setDefaultSel((prev) => {
+        const next = { ...prev };
+        if (isDefault) delete next[subcategoryKey];
+        else next[subcategoryKey] = optionId;
+        return next;
+      });
     } catch (e) {
       setSave({ loading: false, error: e instanceof Error ? e.message : 'Failed to set default' });
     } finally {
@@ -324,8 +342,9 @@ export default function AdminBackgroundsPage() {
         loading: false,
         result: failed > 0 ? `Saved ${updated} backgrounds, ${failed} price update(s) failed (see console).` : `All ${updated} backgrounds saved.`,
       });
-      // Reload to pick up itemIds.
+      // Reload to pick up itemIds, and re-read the stored defaults the save may have seeded.
       loadExistingBackgrounds(slug);
+      loadAvatars(slug);
     } catch (e) {
       setSave({ loading: false, error: e instanceof Error ? e.message : 'Save failed' });
     }
@@ -344,7 +363,7 @@ export default function AdminBackgroundsPage() {
           Upload backgrounds for an avatar, independent of Spine assets. These become a <code className="bg-slate-700 px-1 rounded">background</code> category in the avatar catalog. Each option is a purchasable store item.
         </p>
         <p className="text-slate-500 text-[11px] mt-1 flex items-center gap-1">
-          <Star className="w-3 h-3" /> marks the avatar&apos;s default background (seeded for new users). Save a background before setting it as default; prefer a free one.
+          <Star className="w-3 h-3" /> marks the avatar&apos;s default background — it seeds new users and is what the app shows behind this character before the player picks one. Click it again to clear the default. Save a background before setting it as default; prefer a free one, since a paid default forces a purchase before the player can save.
         </p>
       </div>
 
@@ -360,7 +379,7 @@ export default function AdminBackgroundsPage() {
               ))}
             </select>
           </div>
-          <button type="button" onClick={loadAvatars} className="px-3 py-2 rounded-lg bg-slate-700 text-slate-200 text-sm hover:bg-slate-600 flex items-center gap-1">
+          <button type="button" onClick={() => loadAvatars(slug || undefined)} className="px-3 py-2 rounded-lg bg-slate-700 text-slate-200 text-sm hover:bg-slate-600 flex items-center gap-1">
             <RefreshCw className="w-4 h-4" /> Refresh
           </button>
         </div>
@@ -441,15 +460,16 @@ export default function AdminBackgroundsPage() {
                     <input type="number" min={1} value={opt.purchaseLimit} onChange={(e) => updateOption(si, oi, { purchaseLimit: Math.max(1, parseInt(e.target.value, 10) || 1) })} className={inputCls} />
                   </div>
                 </div>
-                <div className="lg:col-span-1 flex lg:flex-col lg:items-end gap-2">
+                <div className="lg:col-span-1 flex lg:flex-col lg:items-stretch gap-2">
                   <button
                     type="button"
-                    disabled={!opt.itemId || defaultSel[sub.key] === opt.optionId || settingDefault === `${sub.key}/${opt.optionId}`}
-                    onClick={() => setDefaultBackground(sub.key, opt.optionId)}
-                    title={!opt.itemId ? 'Save this background first, then set it as default' : defaultSel[sub.key] === opt.optionId ? 'Current default' : opt.price > 0 ? 'Set as default (note: this background is not free)' : 'Set as default'}
-                    className={`px-2 py-2 rounded-lg disabled:opacity-50 ${defaultSel[sub.key] === opt.optionId ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
+                    disabled={!opt.itemId || settingDefault === `${sub.key}/${opt.optionId}`}
+                    onClick={() => toggleDefaultBackground(sub.key, opt.optionId)}
+                    title={!opt.itemId ? 'Save this background first, then set it as default' : defaultSel[sub.key] === opt.optionId ? 'Current default — click to clear it' : opt.price > 0 ? 'Set as default (note: this background is not free)' : 'Set as default'}
+                    className={`px-2 py-2 rounded-lg text-[11px] flex items-center justify-center gap-1 disabled:opacity-50 ${defaultSel[sub.key] === opt.optionId ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
                   >
-                    <Star className="w-4 h-4" fill={defaultSel[sub.key] === opt.optionId ? 'currentColor' : 'none'} />
+                    <Star className="w-4 h-4 shrink-0" fill={defaultSel[sub.key] === opt.optionId ? 'currentColor' : 'none'} />
+                    {defaultSel[sub.key] === opt.optionId ? 'Default' : 'Set default'}
                   </button>
                   <button type="button" onClick={() => removeOption(si, oi)} className="px-2 py-2 rounded-lg bg-red-900/60 text-red-200 hover:bg-red-900" title="Remove option">
                     <Trash2 className="w-4 h-4" />
