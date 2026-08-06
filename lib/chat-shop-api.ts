@@ -197,17 +197,30 @@ export async function upsertItem(req: SyncItemRequest): Promise<SyncItemResponse
   return unwrapAdminRpcData<SyncItemResponse>(raw);
 }
 
-// getPackAssets loads a pack's full editable assets (cover + items with
-// tier/price/tags) for the edit form. The admin list row does NOT carry
-// assets, so without this the form opens empty and a Save — which replaces
-// the asset list wholesale — would wipe the pack.
-export async function getPackAssets(itemId: string): Promise<PackAssets> {
-  const raw = await callAdminRpc('chat_shop/admin_get_pack', JSON.stringify({ itemId }));
-  const data = unwrapAdminRpcData<PackAssets>(raw);
-  // The server omits empty arrays (json omitempty), so normalise each item's
-  // tags to [] — the tags editor would otherwise call .join on undefined.
-  const items = (data.items ?? []).map((it) => ({ ...it, tags: it.tags ?? [] }));
-  return { coverUrl: data.coverUrl ?? '', items };
+// getItemAdmin loads ONE item in the same shape upsertItem posts back —
+// metadata (price, sort order, availability) plus the typed asset envelope —
+// so the edit form is a true round-trip.
+//
+// The admin list row carries none of that. Pre-filling from defaults instead
+// meant bubble styles / backgrounds / fonts / themes opened with empty image
+// fields, and Save was then rejected server-side ("sent and received image
+// URLs are required") — while price and sort order were silently reset to 0.
+//
+// Returned assets can be partial (or absent) when the detail row was never
+// written; callers merge over their blank scaffold — see hydrateAssets in
+// app/admin/chat-shop/page.tsx.
+export async function getItemAdmin(itemId: string): Promise<SyncItemRequest> {
+  const raw = await callAdminRpc('chat_shop/admin_get_item', JSON.stringify({ itemId }));
+  const data = unwrapAdminRpcData<SyncItemRequest>(raw);
+  // The server omits empty arrays (json omitempty), so normalise each pack
+  // item's tags to [] — the tags editor would otherwise call .join on undefined.
+  if (data.assets?.pack) {
+    data.assets.pack.items = (data.assets.pack.items ?? []).map((it) => ({
+      ...it,
+      tags: it.tags ?? [],
+    }));
+  }
+  return data;
 }
 
 export async function publishItem(itemId: string): Promise<{ shopVersion: number }> {

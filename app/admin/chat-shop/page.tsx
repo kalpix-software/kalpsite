@@ -17,9 +17,10 @@ import {
   SUBCATEGORIES,
   SUBCATEGORY_LABEL,
   Subcategory,
+  SyncAssetsEnvelope,
   SyncItemRequest,
   archiveItem,
-  getPackAssets,
+  getItemAdmin,
   grantItem,
   listItemsAdmin,
   publishItem,
@@ -42,6 +43,67 @@ const STATUS_FILTERS: { value: ItemStatus | ''; label: string }[] = [
   { value: 'hidden', label: 'Hidden' },
   { value: 'archived', label: 'Archived' },
 ];
+
+/**
+ * Merge the stored assets over the blank scaffold for a subcategory.
+ *
+ * The server can legitimately return a partial (or entirely absent) envelope
+ * when an item's detail row was never written, and the nested rect/padding
+ * objects are what the number inputs bind to — a missing one would blow up
+ * the field components on render. Anything the server did store wins.
+ */
+function hydrateAssets(
+  sub: Subcategory,
+  stored: SyncAssetsEnvelope | undefined,
+): SyncAssetsEnvelope {
+  const base = defaultAssetsFor(sub);
+  if (!stored) return base;
+
+  switch (sub) {
+    case 'bubble_style': {
+      const d = base.bubbleStyle!;
+      const s = stored.bubbleStyle;
+      if (!s) return base;
+      return {
+        bubbleStyle: {
+          ...d,
+          ...s,
+          sentCenterSlice: s.sentCenterSlice ?? d.sentCenterSlice,
+          sentPadding: s.sentPadding ?? d.sentPadding,
+          receivedCenterSlice: s.receivedCenterSlice ?? d.receivedCenterSlice,
+          receivedPadding: s.receivedPadding ?? d.receivedPadding,
+        },
+      };
+    }
+    case 'background':
+      return { background: { ...base.background!, ...(stored.background ?? {}) } };
+    case 'font': {
+      const s = stored.font;
+      return {
+        font: {
+          ...base.font!,
+          ...(s ?? {}),
+          // A font row always has weights, but an empty/absent list would
+          // leave the comma-separated input blank and wipe them on save.
+          supportedWeights: s?.supportedWeights?.length
+            ? s.supportedWeights
+            : base.font!.supportedWeights,
+        },
+      };
+    }
+    case 'theme':
+      return { theme: { ...base.theme!, ...(stored.theme ?? {}) } };
+    case 'sticker_pack':
+    case 'gif_pack':
+    case 'emote_pack':
+      return {
+        pack: {
+          coverUrl: stored.pack?.coverUrl ?? '',
+          items: (stored.pack?.items ?? []).map((it) => ({ ...it, tags: it.tags ?? [] })),
+        },
+      };
+  }
+}
 
 export default function ChatShopAdminPage() {
   const [tab, setTab] = useState<Subcategory>('theme');
@@ -201,46 +263,24 @@ export default function ChatShopAdminPage() {
         loadError={loadError}
         onEdit={async (it) => {
           const sub = it.subcategory as Subcategory;
-          const isPack =
-            sub === 'sticker_pack' || sub === 'gif_pack' || sub === 'emote_pack';
 
-          // Pack assets (cover + items with tier/price/tags) are NOT on the
-          // admin list row, so fetch them for the edit form. Without this the
-          // form opens empty and Save — which replaces the asset list
-          // wholesale — would wipe every uploaded sticker. Non-pack detail
-          // assets (bubble 9-slice, etc.) are still scaffolded from defaults;
-          // the admin re-confirms those as before.
-          let assets = defaultAssetsFor(sub);
-          if (isPack) {
-            try {
-              const pack = await getPackAssets(it.itemId);
-              assets = { ...assets, pack };
-            } catch (e) {
-              // Do NOT open an empty edit form on failure — saving it would
-              // clear the pack. Surface the error and bail.
-              setToast(e instanceof Error ? e.message : 'Failed to load pack assets');
-              return;
-            }
+          // Load the FULL item — the admin list row carries no assets and no
+          // price / sort order / availability. Scaffolding those from defaults
+          // (what this used to do for every non-pack subcategory) opened the
+          // form with empty image fields, so Save was rejected server-side and
+          // price/sortOrder were quietly reset to 0.
+          let full: SyncItemRequest;
+          try {
+            full = await getItemAdmin(it.itemId);
+          } catch (e) {
+            // Do NOT open a blank edit form on failure — a Save from it
+            // replaces assets wholesale and would wipe the item.
+            setToast(e instanceof Error ? e.message : 'Failed to load item');
+            return;
           }
           setEditing({
             mode: 'edit',
-            draft: {
-              itemId: it.itemId,
-              subcategory: sub,
-              slug: it.slug,
-              name: it.name,
-              description: it.description ?? '',
-              iconUrl: it.iconUrl ?? '',
-              previewUrl: it.previewUrl ?? '',
-              currencyType: 'coins',
-              price: 0,
-              rarity: it.rarity,
-              status: it.status,
-              sortOrder: 0,
-              isDefault: it.isDefault,
-              previewAllowed: true,
-              assets,
-            },
+            draft: { ...full, subcategory: sub, assets: hydrateAssets(sub, full.assets) },
           });
         }}
         onPublish={onPublish}

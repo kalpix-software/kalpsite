@@ -23,6 +23,25 @@ const allowedContentTypes: Record<string, string> = {
   'image/png': '.png',
   'image/jpeg': '.jpg',
   'image/gif': '.gif',
+  // Chat-shop font items (itemType=chat_item, subcategory=font). Browsers are
+  // inconsistent about which of these they report for the same .ttf/.otf file.
+  'font/ttf': '.ttf',
+  'font/otf': '.otf',
+  'font/woff': '.woff',
+  'font/woff2': '.woff2',
+  'application/font-woff': '.woff',
+  'application/x-font-ttf': '.ttf',
+  'application/x-font-otf': '.otf',
+};
+
+// Content type → extension for fonts identified by filename. Browsers often
+// report a bare application/octet-stream for .ttf/.otf, so the extension is
+// the only usable signal; we still whitelist it rather than trusting the name.
+const fontExtToContentType: Record<string, string> = {
+  '.ttf': 'font/ttf',
+  '.otf': 'font/otf',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
 };
 
 const allowedItemTypes = new Set([
@@ -123,11 +142,22 @@ export async function POST(req: NextRequest) {
     // Determine content type
     let ct = fileEntry.type || '';
     if (ct.includes(';')) ct = ct.split(';')[0].trim();
-    if (!allowedContentTypes[ct]) {
-      return NextResponse.json({ error: `Content type "${ct}" not allowed` }, { status: 400, headers: NO_STORE });
+    let ext = allowedContentTypes[ct];
+    if (!ext) {
+      // Fall back to the filename for fonts the browser typed as a generic
+      // binary blob (or typed not at all) — otherwise a perfectly valid .ttf
+      // is rejected with `Content type "application/octet-stream" not allowed`.
+      const dot = fileName.lastIndexOf('.');
+      const guess = dot >= 0 ? fileName.slice(dot).toLowerCase() : '';
+      const fontCt = fontExtToContentType[guess];
+      if (fontCt && (ct === '' || ct === 'application/octet-stream')) {
+        ext = guess;
+        ct = fontCt;
+      } else {
+        return NextResponse.json({ error: `Content type "${ct}" not allowed` }, { status: 400, headers: NO_STORE });
+      }
     }
 
-    const ext = allowedContentTypes[ct];
     const key = buildKey(itemType, category, subcategory, fileName, ext);
     const data = Buffer.from(await fileEntry.arrayBuffer());
 
