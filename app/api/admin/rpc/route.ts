@@ -90,6 +90,7 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   // Chat shop – admin only (see lib/chat-shop-api.ts callers).
   'chat_shop/admin_list_items',
   'chat_shop/admin_get_pack', // load a pack's cover + items to pre-fill the edit form
+  'chat_shop/admin_get_item', // load one item (meta + typed assets) to pre-fill the edit form
   'chat_shop/admin_upsert_item',
   'chat_shop/admin_publish_item',
   'chat_shop/admin_archive_item',
