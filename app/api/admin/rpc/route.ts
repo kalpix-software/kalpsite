@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { gameRpc } from '@/lib/kalpix-api';
 import { AUTH_COOKIE_NAME, validateOrigin } from '@/lib/auth-cookie';
 
+// assets/admin_publish_bundle downloads and hashes the archive it is being
+// asked to register before it writes anything, which takes longer than the
+// default function budget. Without this the proxy times out while the backend
+// goes on to publish successfully, and the panel reports a failure that isn't.
+export const maxDuration = 60;
+
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
 /** Allowed RPC IDs for the admin panel. Backend still enforces is_admin for admin_* RPCs. */
@@ -116,6 +122,13 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   'referral/admin_list_milestones',
   'referral/admin_upsert_milestone',
   'referral/admin_list',
+  // Downloadable asset packs (Tero Spine effects, sprite sheets, audio) —
+  // admin only. The zip is built and uploaded to R2 outside this system;
+  // these RPCs only register the pointer at it.
+  'assets/admin_list_bundles',
+  'assets/admin_publish_bundle',
+  'assets/admin_set_active',
+  'assets/admin_delete_bundle',
   // Broadcasts (promotional push to opted-in users) — admin only.
   'notifications/admin_broadcast',
   'notifications/admin_list_broadcasts',

@@ -1280,9 +1280,22 @@ export default function AdminAvatarsPage() {
       // Update local state with itemIds
       setPriceRows(rowsToSave);
 
+      // New avatars are drafts until published, so "saved" on its own reads as
+      // "done" when there is still one step left. Say what the remaining step is.
+      // Absent from the list counts as draft: a first-time upload has no row
+      // in the loaded list yet, and that is precisely the case that needs the
+      // reminder. Guarded on the list having loaded at all, so an empty list
+      // never labels a live avatar a draft.
+      const liveSlugs = new Set(listAvatars.filter((la) => la.isActive).map((la) => la.slug));
+      const draftSlugs = listAvatars.length > 0
+        ? payload.avatars.map((a) => a.slug).filter((slug) => !liveSlugs.has(slug))
+        : [];
+      const publishHint = draftSlugs.length > 0
+        ? ` ${draftSlugs.join(', ')} ${draftSlugs.length === 1 ? 'is' : 'are'} still Draft — publish in the avatar list above when the previews are done.`
+        : '';
       const msg = failed > 0
-        ? `Saved ${updated} items, ${failed} failed. Check console for details.`
-        : `All ${updated} items saved successfully.`;
+        ? `Saved ${updated} items, ${failed} failed. Check console for details.${publishHint}`
+        : `All ${updated} items saved successfully.${publishHint}`;
       setSaveStatus({ loading: false, result: msg });
 
       const firstAvatar = payload.avatars[0];
@@ -1338,10 +1351,12 @@ export default function AdminAvatarsPage() {
         <div className="p-4 rounded-xl bg-slate-800 border border-slate-700">
           <h2 className="font-medium text-slate-100 mb-2 flex items-center gap-2">
             <List className="w-4 h-4" />
-            Avatar list (active = shown in app)
+            Avatar list (Live = shown in app)
           </h2>
           <p className="text-slate-400 text-xs mb-3">
-            Only avatars marked active appear in <code className="bg-slate-700 px-1 rounded">avatar/list_avatars</code>.
+            Only Live avatars appear in <code className="bg-slate-700 px-1 rounded">avatar/list_avatars</code>.
+            A newly uploaded avatar starts as <span className="text-amber-400">Draft</span> and stays hidden until you
+            publish it here — syncing again (previews, prices) never changes this, so finish the whole upload first.
           </p>
           {listError && <p className="text-sm text-red-400 mb-2">{listError}</p>}
           {listLoading ? (
@@ -1359,7 +1374,7 @@ export default function AdminAvatarsPage() {
                     <tr>
                       <th className="text-left px-3 py-2">Slug</th>
                       <th className="text-left px-3 py-2">Name</th>
-                      <th className="text-left px-3 py-2 w-24">Active</th>
+                      <th className="text-left px-3 py-2 w-32" title="Live avatars are visible to players. Draft avatars are hidden until you publish them.">Status</th>
                       <th className="text-left px-3 py-2 w-32" title="Eligible for new-user random assignment (independent of Active)">Random pool</th>
                     </tr>
                   </thead>
@@ -1374,7 +1389,7 @@ export default function AdminAvatarsPage() {
                           <td className="px-3 py-2">
                             <label className="flex items-center gap-2 cursor-pointer">
                               <input type="checkbox" checked={a.isActive} disabled={togglingId === a.avatarId} onChange={(e) => setAvatarActive(a.avatarId, e.target.checked)} className="rounded border-slate-600 bg-slate-900 text-indigo-600 focus:ring-indigo-500" />
-                              <span className={a.isActive ? 'text-green-400' : 'text-slate-500'}>{togglingId === a.avatarId ? '...' : a.isActive ? 'Yes' : 'No'}</span>
+                              <span className={a.isActive ? 'text-green-400' : 'text-amber-400'}>{togglingId === a.avatarId ? '...' : a.isActive ? 'Live' : 'Draft'}</span>
                             </label>
                           </td>
                           <td className="px-3 py-2">
