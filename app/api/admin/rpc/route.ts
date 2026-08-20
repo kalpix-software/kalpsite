@@ -12,13 +12,13 @@ const NO_STORE = { 'Cache-Control': 'no-store' };
 
 /** Allowed RPC IDs for the admin panel. Backend still enforces is_admin for admin_* RPCs. */
 const ALLOWED_ADMIN_RPC_IDS = new Set([
-  'social/get_profile_info', // session check + Plak uses this
+  'profile/get', // session check + Plak uses this
   // Player-facing search, reused by the admin Users page to find someone by
   // username. Deliberately NOT an admin_* RPC: the backend's global scope is a
   // plain LIKE over username with no visibility filtering, which is exactly what
   // an admin needs. It reaches only id/username/display_name/avatar — no email,
   // wallet or security fields — so exposing it here widens nothing.
-  'social/search_users',
+  'users/search',
   // Avatar identity (display name + thumbnail) and game catalog art, both
   // editable from the admin panel. Backend enforces is_admin on each.
   'avatar/admin_update_avatar',
@@ -51,7 +51,7 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   'chat/remove_reaction',
   'chat/join_stream',
   'chat/leave_stream',
-  'social/upload_media',
+  'media/upload',
   // Store – player view (same session as logged-in user)
   'store/get_wallet',
   'store/get_items',

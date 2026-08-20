@@ -6,7 +6,7 @@ const NO_STORE = { 'Cache-Control': 'no-store' };
 
 /**
  * GET: returns { authenticated: true | false }. Validates the session using
- * social/get_profile_info (same RPC Plak uses). Token from cookie or Authorization header.
+ * profile/get (same RPC Plak uses). Token from cookie or Authorization header.
  */
 export async function GET(req: NextRequest) {
   const token =
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ authenticated: false }, { headers: NO_STORE });
   }
   try {
-    const profile = (await gameRpc(token, 'social/get_profile_info', '{}')) as { isAdmin?: boolean };
+    const profile = (await gameRpc(token, 'profile/get', '{}')) as { isAdmin?: boolean };
     if (profile?.isAdmin === true) {
       return NextResponse.json({ authenticated: true }, { headers: NO_STORE });
     }

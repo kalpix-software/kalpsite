@@ -33,7 +33,7 @@ export default function AdminUsersPage() {
   const [adding, setAdding] = useState(false);
 
   // ── Username search ──
-  // Reuses social/search_users, the same RPC the app's people-search uses. Its
+  // Reuses users/search, the same RPC the app's people-search uses. Its
   // global scope is a plain LIKE over username with no visibility filtering, so
   // an admin sees every account including private ones — which is what an admin
   // tool needs and what a player-facing search must never do. Nothing new was
@@ -53,7 +53,7 @@ export default function AdminUsersPage() {
     try {
       const payload: Record<string, unknown> = { query: q, limit: PAGE_SIZE, scope: 'global' };
       if (append && cursor) payload.cursor = cursor;
-      const data = await callAdminRpc('social/search_users', JSON.stringify(payload));
+      const data = await callAdminRpc('users/search', JSON.stringify(payload));
       const raw = (data?.data ?? data) as { users?: FoundUser[]; nextCursor?: string };
       const found = raw?.users ?? [];
       setResults((prev) => (append && prev ? [...prev, ...found] : found));

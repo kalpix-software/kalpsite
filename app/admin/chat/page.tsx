@@ -670,7 +670,7 @@ export default function AdminChatPage() {
     try {
       const filesList = Array.from(files);
       const digests = await Promise.all(filesList.map((f) => sha256HexFromFile(f)));
-      const res = await callAdminRpc('social/upload_media', JSON.stringify({
+      const res = await callAdminRpc('media/upload', JSON.stringify({
         context: 'chat',
         files: filesList.map((f, i) => ({
           fileName: f.name,

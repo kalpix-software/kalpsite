@@ -26,7 +26,7 @@ type Resolved = {
 // and this must stay a single backend round-trip.
 const resolveProfile = cache(async (app: AppConfig, userId: string): Promise<Resolved | null> => {
   try {
-    const res = await fetch(`${app.apiBase}/api/v1/social/resolve_profile_link`, {
+    const res = await fetch(`${app.apiBase}/api/v1/profile/resolve_link`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ userId }),

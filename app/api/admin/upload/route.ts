@@ -175,7 +175,7 @@ export async function POST(req: NextRequest) {
   // Mirrors the check in /api/auth/session. The backend's own presign RPC
   // (store/admin_get_upload_url) gates with checkAdmin; this path is the twin.
   try {
-    const profile = (await gameRpc(token, 'social/get_profile_info', '{}')) as { isAdmin?: boolean };
+    const profile = (await gameRpc(token, 'profile/get', '{}')) as { isAdmin?: boolean };
     if (profile?.isAdmin !== true) {
       return NextResponse.json({ error: 'Admin only' }, { status: 403, headers: NO_STORE });
     }
