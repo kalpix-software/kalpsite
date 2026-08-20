@@ -16,9 +16,8 @@ type Resolved = {
   avatarUrl?: string;
   bio?: string;
   isPrivate: boolean;
-  followersCount: number;
-  followingCount: number;
   friendsCount: number;
+  gamesPlayed: number;
   totalWins: number;
 };
 
@@ -52,8 +51,8 @@ function summaryOf(data: Resolved, appName: string): string {
   if (data.isPrivate) return `This profile is private. Open it in ${appName}.`;
   const bio = data.bio?.trim();
   if (bio) return bio;
-  const followers = `${data.followersCount} follower${data.followersCount === 1 ? '' : 's'}`;
-  return data.totalWins > 0 ? `${followers} · ${data.totalWins} wins` : followers;
+  const friends = `${data.friendsCount} friend${data.friendsCount === 1 ? '' : 's'}`;
+  return data.totalWins > 0 ? `${friends} · ${data.totalWins} wins` : friends;
 }
 
 // Link previews (WhatsApp, iMessage, Slack…) read these — a shared profile should
@@ -114,9 +113,9 @@ export default async function ProfilePage({ params }: { params: { id: string } }
       stats={
         data && !data.isPrivate
           ? [
-              { label: 'Followers', value: data.followersCount },
-              { label: 'Following', value: data.followingCount },
               { label: 'Friends', value: data.friendsCount },
+              { label: 'Games', value: data.gamesPlayed },
+              { label: 'Wins', value: data.totalWins },
             ]
           : undefined
       }
