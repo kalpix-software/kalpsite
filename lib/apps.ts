@@ -10,13 +10,29 @@
 export type AppConfig = {
   /** Display name shown on the invite landing page. */
   name: string;
-  /** Android application id, e.g. "com.kalpix.plak". */
-  androidPackage: string;
+  /** Every Android application id allowed to handle links on this host.
+   *
+   *  A LIST, not one value, because Android cannot be served a per-app file:
+   *  its verifier fetches assetlinks.json as a plain GET that names neither the
+   *  package nor the certificate, then looks for ITSELF in the response. So the
+   *  file lists every app instead of branching on the caller.
+   *
+   *  Include build flavours that change the id. Plak's staging flavour sets
+   *  applicationIdSuffix ".staging", so its links fail verification unless
+   *  "com.kalpixsoftware.plak.staging" appears here too. */
+  androidPackages: string[];
   /** SHA-256 signing-cert fingerprint(s) from Play Console -> App signing.
-   *  Colon-separated upper-case hex, e.g. "AA:BB:CC:...". */
+   *  Colon-separated upper-case hex, e.g. "AA:BB:CC:...".
+   *
+   *  Applied to every package above: Android accepts the link if ANY listed
+   *  fingerprint matches, so listing a spare is harmless and omitting the right
+   *  one silently breaks every link. */
   androidFingerprints: string[];
-  /** iOS app id as "<TeamID>.<BundleID>", e.g. "ABCDE12345.com.kalpix.plak". */
-  iosAppId: string;
+  /** iOS app ids as "<TeamID>.<BundleID>", e.g. "ABCDE12345.com.kalpix.plak".
+   *
+   *  Also a list, for the same reason — Apple fetches one file per host — and
+   *  it is where a separate staging bundle id would go. */
+  iosAppIds: string[];
   /** Store URLs for the "app not installed" fallback buttons. */
   playUrl: string;
   appStoreUrl: string;
@@ -27,7 +43,13 @@ export type AppConfig = {
 export const APPS: Record<string, AppConfig> = {
   'plak.kalpixsoftware.com': {
     name: 'Plak',
-    androidPackage: 'com.kalpixsoftware.plak',
+    androidPackages: [
+      'com.kalpixsoftware.plak',
+      // The staging flavour (applicationIdSuffix ".staging"). Without this a
+      // deep link tested on a staging build opens the browser, which reads as
+      // "deep links are broken" rather than "wrong package".
+      'com.kalpixsoftware.plak.staging',
+    ],
     // SHA-256 of every certificate that may sign the app. Android accepts the
     // link if ANY listed fingerprint matches, so an extra entry is harmless
     // while a missing one silently breaks deep links.
@@ -42,7 +64,10 @@ export const APPS: Record<string, AppConfig> = {
     androidFingerprints: ["51:B2:AE:5B:69:75:37:3B:9D:2F:6A:60:28:4F:A6:F7:2F:16:B4:DF:03:37:34:99:15:45:75:FC:4B:B5:24:00",
         "60:8D:1E:8A:EC:9D:A4:C6:E9:34:65:E6:01:09:B2:08:96:03:47:94:61:82:AF:A9:27:6F:B9:C7:26:3A:1C:47"],
     // ── STILL TO FILL ────────────────────────────────────────────────
-    iosAppId: 'REPLACE_ME_TEAMID.com.kalpixsoftware.plak', // <TeamID>.<BundleID>
+    iosAppIds: [
+      'REPLACE_ME_TEAMID.com.kalpixsoftware.plak', // <TeamID>.<BundleID>
+      // 'REPLACE_ME_TEAMID.com.kalpixsoftware.plak.staging',
+    ],
     appStoreUrl: 'https://apps.apple.com/app/idREPLACE_ME', // App Store listing
     // ─────────────────────────────────────────────────────────────────
     playUrl: 'https://play.google.com/store/apps/details?id=com.kalpixsoftware.plak',

@@ -13,16 +13,17 @@ export async function GET(request: Request) {
     return new NextResponse('Not found', { status: 404 });
   }
 
-  const body = [
-    {
-      relation: ['delegate_permission/common.handle_all_urls'],
-      target: {
-        namespace: 'android_app',
-        package_name: app.androidPackage,
-        sha256_cert_fingerprints: app.androidFingerprints,
-      },
+  // One statement per package. Android cannot be served a tailored file — the
+  // verifier's GET names neither the package nor the certificate — so every app
+  // allowed on this host is listed and each one finds its own entry.
+  const body = app.androidPackages.map((packageName) => ({
+    relation: ['delegate_permission/common.handle_all_urls'],
+    target: {
+      namespace: 'android_app',
+      package_name: packageName,
+      sha256_cert_fingerprints: app.androidFingerprints,
     },
-  ];
+  }));
 
   return NextResponse.json(body, {
     headers: {

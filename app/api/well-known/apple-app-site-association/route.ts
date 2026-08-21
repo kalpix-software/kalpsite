@@ -21,7 +21,7 @@ export async function GET(request: Request) {
     applinks: {
       details: [
         {
-          appIDs: [app.iosAppId],
+          appIDs: app.iosAppIds,
           components: [
             { '/': '/i/*', comment: 'Group invite links' },
             { '/': '/p/*', comment: 'Profile share links' },
