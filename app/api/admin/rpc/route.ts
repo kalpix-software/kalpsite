@@ -144,6 +144,20 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   'news/admin_upsert',
   'news/admin_set_published',
   'news/admin_delete',
+  // Jigsaw — admin only. Packs, the puzzles inside them, and the daily-free
+  // schedule. The player-facing jigsaw/get_* and the session RPCs are app-only
+  // and deliberately absent: this route is the admin console's door, not a
+  // general proxy.
+  'jigsaw/admin_list_packs',
+  'jigsaw/admin_upsert_pack',
+  'jigsaw/admin_set_pack_active',
+  'jigsaw/admin_delete_pack',
+  'jigsaw/admin_list_puzzles',
+  'jigsaw/admin_upsert_puzzle',
+  'jigsaw/admin_set_puzzle_active',
+  'jigsaw/admin_delete_puzzle',
+  'jigsaw/admin_list_daily',
+  'jigsaw/admin_set_daily',
   // Refer and Earn — admin only. get_status/redeem are app-only, and
   // referral/resolve_code is deliberately public (the /r/<code> landing page
   // calls it with no session), so neither belongs in this allowlist.
