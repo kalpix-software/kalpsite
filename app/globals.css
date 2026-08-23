@@ -64,15 +64,3 @@ body {
   transition-duration: 150ms;
 }
 
-/* The chess board owns its own animations: piece sprites carry an inline
-   `transition: transform 180ms` (and `none` while dragged), which beats the
-   global rule above. Highlight and move-dest markers must NOT inherit the
-   global transform/opacity transition though — they are repositioned as the
-   player taps around, and a 150ms tween makes them smear between squares
-   instead of snapping.
-
-   Pieces are excluded — `!important` would otherwise beat their inline
-   transition and kill the slide animation entirely. */
-.kalpix-chess-board > *:not(.kalpix-chess-piece) {
-  transition: none !important;
-}

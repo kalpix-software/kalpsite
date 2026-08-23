@@ -3,7 +3,7 @@
 import { useState, useRef } from 'react';
 import { Plus, Upload, CheckCircle2, AlertCircle } from 'lucide-react';
 import { callAdminRpc, unwrapAdminRpcData } from '@/lib/admin-rpc';
-import { CHESS_PIECE_NAMES } from '@/lib/kalpix-web-sdk/chess';
+import { CHESS_PIECE_NAMES } from '@/lib/chess-piece-names';
 
 // Chess cosmetic uploader — boards, piece sets and backgrounds.
 //
