@@ -44,7 +44,7 @@ const sections: Section[] = [
 				kind: 'list',
 				items: [
 					`By using the service you confirm that you are at least ${APP.minimumAge}, that you are able to enter into a binding contract, and that nothing in the law that applies to you prevents you from using a paid gaming and social app.`,
-					`You must give accurate registration information and keep it up to date. We do not collect a date of birth when you register, so the confirmation you give that you are at least ${APP.minimumAge} is what we rely on.`,
+					`You must give accurate registration information and keep it up to date. When you first open the app we ask your age, before any account exists — that answer is what we rely on. It is recorded once, and signing out or reinstalling does not let you answer it again.`,
 					'One person, one account. Do not create or operate more than one account for yourself, and do not let anyone else use yours.',
 					'We may ask you to confirm or verify your age at any time, and we may ask for a document that shows it. If you do not respond, or the information you gave turns out to be false, we may suspend or close the account.',
 					'If we learn that an account holder is below the minimum age, we will close the account and delete the data we hold for it, apart from anything the law requires us to keep.',

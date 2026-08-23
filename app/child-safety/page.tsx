@@ -42,7 +42,11 @@ const sections: Section[] = [
 			},
 			{
 				kind: 'text',
-				body: `We should be plain about how that rule is applied. We do not collect your date of birth, and the app does not put an age screen in front of you at sign-up. The minimum age is a rule we act on when someone tells us it has been broken, not a check the app performs by itself.`,
+				body: `We should be plain about how that rule is applied. The app asks your age on the very first screen, before an account exists and before we collect anything else. The question is deliberately neutral — a list of ages to scroll through, not “are you over ${APP.minimumAge}?” — because a question that tells you which answer opens the door is not really a check. The answer is recorded once, on the device and on the account, so being turned away cannot be retried by answering differently.`,
+			},
+			{
+				kind: 'text',
+				body: `That is a self-declared age, not a verified one, and we will not pretend otherwise: someone determined to misstate it can. The screen is there to stop the ordinary case honestly and early. It sits alongside acting on reports, and does not replace it.`,
 			},
 			{
 				kind: 'text',

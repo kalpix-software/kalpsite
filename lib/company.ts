@@ -131,11 +131,11 @@ export const APP = {
  * IT Rules 2021 Rule 3(1)(f) requires users to be notified at least annually.
  */
 export const POLICY_VERSIONS = {
-	privacy: { version: '2.0', effective: '2026-08-15' },
-	terms: { version: '2.0', effective: '2026-08-15' },
+	privacy: { version: '2.1', effective: '2026-08-23' },
+	terms: { version: '2.1', effective: '2026-08-23' },
 	community: { version: '1.0', effective: '2026-08-15' },
 	refunds: { version: '1.0', effective: '2026-08-15' },
-	childSafety: { version: '1.0', effective: '2026-08-15' },
+	childSafety: { version: '1.1', effective: '2026-08-23' },
 } as const
 
 /** Statutory response clocks, published so users can hold us to them. */
@@ -177,11 +177,19 @@ export const PROCESSORS = [
 		active: true,
 	},
 	{
+		// Kept as a record rather than deleted, so that wiring S3 back up is a
+		// one-line change here and cannot be done without restoring the
+		// disclosure. active:false removes it from the published table.
+		//
+		// Not live: PROFILE_IMAGE_STORAGE is r2 on every environment and the
+		// AWS_* credentials are unset on both droplets, so no file reaches S3.
+		// Naming a recipient we do not actually send data to is still an
+		// inaccurate disclosure, even though it errs generously.
 		name: 'Amazon Web Services (S3)',
-		purpose: 'Storing and serving uploaded files. Used as the storage backend wherever Cloudflare R2 is not configured, so it is a live path and not only a backup.',
+		purpose: 'Storing and serving uploaded files. Not in use — Cloudflare R2 is the storage backend on every environment.',
 		data: 'Uploaded media files and their metadata.',
 		location: 'India / Asia-Pacific regions',
-		active: true,
+		active: false,
 	},
 	{
 		name: 'DigitalOcean',
@@ -247,9 +255,20 @@ export const PROCESSORS = [
 export const DATA_CATEGORIES = [
 	{
 		category: 'Account and identity',
-		items: 'Email address, username, display name, profile photo, avatar selection, country, your date of birth, and your phone number if you choose to link one.',
-		why: 'To create and secure your account, to let people find and recognise you, and to confirm you meet the minimum age before you make a purchase.',
+		items:
+			'Email address, username, display name, profile photo, avatar selection, the gender you pick when choosing your starting avatar, country, and your phone number if you choose to link one.',
+		why:
+			'To create and secure your account, and to let people find and recognise you. The gender you pick is used for one thing only — deciding which avatar your account starts with. You can change that avatar whenever you like, and we do not use the answer for advertising, pricing, matchmaking or anything else.',
 		retention: 'For as long as your account exists.',
+	},
+	{
+		category: 'Age',
+		items:
+			'The age you enter on the first screen when you open the app, and the date you entered it. If you have separately given us an actual date of birth, that as well — we never turn an age into a date of birth, so this is empty unless you were asked for one.',
+		why:
+			'Under the Digital Personal Data Protection Act 2023 anyone under 18 is a child, and creating an account is itself processing, so we have to establish age before an account exists rather than afterwards. It is also what we check before a purchase or anything else age-restricted.',
+		retention:
+			'For as long as your account exists. The answer is recorded once and re-entering it does not change it, so being turned away cannot be retried by answering differently.',
 	},
 	{
 		category: 'Authentication and security',
