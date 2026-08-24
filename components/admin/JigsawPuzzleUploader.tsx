@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Plus, Upload, CheckCircle2, AlertCircle } from 'lucide-react';
-import { adminUpsertPuzzle, getUploadUrl } from '@/lib/jigsaw-api';
+import { JigsawPuzzle, adminUpsertPuzzle, getUploadUrl } from '@/lib/jigsaw-api';
 
 // Jigsaw uploaders — a pack's cover, and the puzzles inside it.
 //
@@ -29,6 +29,21 @@ import { adminUpsertPuzzle, getUploadUrl } from '@/lib/jigsaw-api';
 interface UploadEntry {
   file: File;
   status: 'pending' | 'uploading' | 'done' | 'error';
+  /**
+   * The slug this file will be filed under, resolved once when the file is
+   * picked rather than recomputed at upload time.
+   *
+   * It has to be stored: `slug` is UNIQUE and the create path upserts on it, so
+   * two files whose names slugify the same would silently overwrite each other.
+   * Deciding the slug up front is what lets the row below say which of the two
+   * it is about to do, and lets the admin change the answer before committing.
+   */
+  slug: string;
+  /**
+   * Name of the puzzle this entry will overwrite, when its slug is already
+   * taken in this pack. Undefined means it creates a new row.
+   */
+  replaces?: string;
   /** The source rendition's URL — what becomes the puzzle's imageUrl. */
   publicUrl?: string;
   error?: string;
@@ -89,6 +104,26 @@ function slugify(s: string): string {
  */
 function puzzleSlugFor(packSlug: string, stem: string): string {
   return slugify(`${packSlug}_${stem}`).slice(0, MAX_SLUG_LEN);
+}
+
+/**
+ * `base` with `_2`, `_3`, … appended until it is not in `taken`.
+ *
+ * The base is trimmed to leave room for the suffix rather than the whole result
+ * being sliced afterwards. Slicing last is what makes this loop non-terminating
+ * on a base already at the column width: every candidate would truncate back to
+ * the same 96 characters and stay taken forever.
+ */
+function freeSlug(base: string, taken: Set<string>): string {
+  if (!taken.has(base)) return base;
+  for (let n = 2; n < 1000; n++) {
+    const suffix = `_${n}`;
+    const candidate = `${base.slice(0, MAX_SLUG_LEN - suffix.length)}${suffix}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  // 998 files sharing one name is not a real scenario; failing loudly beats
+  // returning a slug that silently overwrites something.
+  throw new Error(`Could not find a free slug for "${base}"`);
 }
 
 function titleize(s: string): string {
@@ -288,10 +323,18 @@ export function JigsawPackCoverUploader({
 export default function JigsawPuzzleUploader({
   packId,
   packSlug,
+  existing,
   onUploaded,
 }: {
   packId: string;
   packSlug: string;
+  /**
+   * The puzzles already in this pack, so a queued file can say whether it will
+   * create a row or overwrite one. Without it the uploader is blind: the create
+   * path upserts on a UNIQUE slug, so a second image whose filename slugifies
+   * the same replaces the first with no warning and no way to notice.
+   */
+  existing: JigsawPuzzle[];
   onUploaded?: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -329,13 +372,60 @@ export default function JigsawPuzzleUploader({
     const images = picked.filter((f) => extOf(f.name) in CONTENT_TYPE_BY_EXT);
 
     revokePreviews(entries);
-    setEntries(images.map((file) => ({ file, status: 'pending' as const })));
+
+    // Two different collisions, resolved differently on purpose.
+    //
+    // Against a puzzle ALREADY in the pack: keep the colliding slug and flag it
+    // as a replacement. Re-dropping a file to fix its art is the common case and
+    // must keep repointing the same row rather than accumulating near-duplicates
+    // — the row just has to say so, and offer the other choice.
+    //
+    // Against another file in THIS batch: disambiguate immediately. Two files
+    // named the same in one drop cannot both be "the corrected art" for one
+    // puzzle, so silently letting the last one win would drop an image the admin
+    // explicitly selected.
+    const existingBySlug = new Map(existing.filter((p) => p.slug).map((p) => [p.slug as string, p]));
+    const usedInBatch = new Set<string>();
+    const nextEntries = images.map((file) => {
+      const base = puzzleSlugFor(packSlug, stemOf(file.name));
+      const slug = usedInBatch.has(base) ? freeSlug(base, usedInBatch) : base;
+      usedInBatch.add(slug);
+      const clash = existingBySlug.get(slug);
+      return {
+        file,
+        status: 'pending' as const,
+        slug,
+        replaces: clash ? clash.name || clash.slug : undefined,
+      };
+    });
+
+    setEntries(nextEntries);
     setCreatedCount(null);
     setError(
       images.length < picked.length
         ? `Ignored ${picked.length - images.length} non-image file(s) — puzzles must be WebP, PNG or JPEG.`
         : '',
     );
+  }
+
+  /**
+   * Flip one queued file from "replace that puzzle" to "add a new one",
+   * by moving it onto the first slug nothing has claimed.
+   *
+   * Both the pack's existing puzzles and the rest of the batch are treated as
+   * taken — otherwise the freed slug could land on a sibling entry and simply
+   * move the collision somewhere the admin is no longer looking at.
+   */
+  function addAsNew(index: number) {
+    setEntries((cur) => {
+      const taken = new Set<string>([
+        ...existing.map((p) => p.slug ?? '').filter(Boolean),
+        ...cur.map((e, i) => (i === index ? '' : e.slug)).filter(Boolean),
+      ]);
+      return cur.map((e, i) =>
+        i === index ? { ...e, slug: freeSlug(e.slug, taken), replaces: undefined } : e,
+      );
+    });
   }
 
   async function submit() {
@@ -404,9 +494,12 @@ export default function JigsawPuzzleUploader({
         // of duplicating it. sortOrder and isActive are left unsent: they are
         // patch fields, and sending them would clobber an order the admin set by
         // hand in the pack editor.
+        // entry.slug, never a fresh puzzleSlugFor(): the row the admin approved
+        // may have been moved off a collision by addAsNew, and recomputing here
+        // would quietly put it back on the slug it was moved away from.
         const stem = stemOf(entry.file.name);
         await adminUpsertPuzzle({
-          slug: puzzleSlugFor(packSlug, stem),
+          slug: entry.slug,
           packId,
           name: titleize(stem),
           imageUrl,
@@ -470,9 +563,12 @@ export default function JigsawPuzzleUploader({
       </div>
 
       <p className="text-xs text-slate-400">
-        Drop as many images as you like — <strong>each one becomes a puzzle in this pack</strong>.
-        Puzzles are never priced; players get them by owning the pack. The name and slug come
-        from the filename, so <code>maple-road.webp</code> publishes as <strong>Maple Road</strong>.
+        Drop as many images as you like — <strong>each one becomes a puzzle in this pack</strong>,
+        and a pack can hold any number of them. Puzzles are never priced; players get them by
+        owning the pack. The name and slug come from the filename, so <code>maple-road.webp</code>{' '}
+        publishes as <strong>Maple Road</strong> — which means a file whose name matches a puzzle
+        already here <strong>replaces that puzzle&apos;s art</strong> rather than adding a second
+        one. Any row that will do so says so below, and offers to add it as a new puzzle instead.
         Each file is uploaded three times — full-size for the board, {PREVIEW_MAX_EDGE}px for the
         settings sheet, {THUMB_MAX_EDGE}px for the grid tile — all generated here in the browser.
       </p>
@@ -535,10 +631,22 @@ export default function JigsawPuzzleUploader({
                         <div className="w-8 h-8 rounded bg-slate-800 border border-slate-700" />
                       )}
                     </td>
-                    <td className="px-2 py-1 text-slate-200">{titleize(stem)}</td>
-                    <td className="px-2 py-1 font-mono text-slate-500">
-                      {puzzleSlugFor(packSlug, stem)}
+                    <td className="px-2 py-1 text-slate-200">
+                      {titleize(stem)}
+                      {e.replaces && e.status === 'pending' && (
+                        <span className="block text-[10px] text-amber-400" title="This filename is already used by a puzzle in this pack. Uploading will replace that puzzle's art instead of adding a new one.">
+                          replaces “{e.replaces}”
+                          <button
+                            type="button"
+                            onClick={() => addAsNew(i)}
+                            className="ml-1.5 underline hover:text-amber-300"
+                          >
+                            add as new instead
+                          </button>
+                        </span>
+                      )}
                     </td>
+                    <td className="px-2 py-1 font-mono text-slate-500">{e.slug}</td>
                     <td className="px-2 py-1 text-slate-400">
                       {e.file.name} · {prettyBytes(e.file.size)}
                     </td>
@@ -558,7 +666,11 @@ export default function JigsawPuzzleUploader({
                       )}
                     </td>
                     <td className="px-2 py-1">
-                      {e.status === 'done' && <span className="text-emerald-400 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> created</span>}
+                      {e.status === 'done' && (
+                        <span className="text-emerald-400 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> {e.replaces ? 'replaced' : 'created'}
+                        </span>
+                      )}
                       {e.status === 'error' && <span className="text-red-400 flex items-center gap-1"><AlertCircle className="w-3 h-3" /> {e.error ?? 'error'}</span>}
                       {e.status === 'uploading' && <span className="text-amber-400">uploading…</span>}
                       {e.status === 'pending' && <span className="text-slate-500">pending</span>}

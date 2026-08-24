@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { CalendarDays, Plus, Power, Puzzle, RefreshCw, Save, Trash2 } from 'lucide-react';
+import { CalendarDays, FolderTree, Pencil, Plus, Power, Puzzle, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { callAdminRpc, unwrapAdminRpcData } from '@/lib/admin-rpc';
 import {
   AdminDailyEntry,
@@ -37,6 +37,11 @@ import JigsawPuzzleUploader, { JigsawPackCoverUploader } from '@/components/admi
 // Copied verbatim from the other admin pages (lounges, news, broadcast): there
 // is no shared UI kit, and at module scope both components below reach it.
 const inputCls = 'w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-sm';
+
+// Sentinel <option> value for "+ New collection…". Deliberately not a legal
+// slugify() output — that function emits only [a-z0-9_], so no typed collection
+// name can ever collide with this and be mistaken for the sentinel.
+const NEW_COLLECTION = '__new__';
 
 // ─── Types ───
 
@@ -134,6 +139,15 @@ export default function AdminJigsawPage() {
   const [saving, setSaving] = useState(false);
   const [busyPuzzleId, setBusyPuzzleId] = useState('');
   const [error, setError] = useState('');
+  // null = pick from the dropdown; a string = the admin is typing a new key.
+  // '' is a meaningful state here (the box is open but empty), which is why this
+  // is not just a boolean paired with a value.
+  const [newCollection, setNewCollection] = useState<string | null>(null);
+  // The puzzle whose tile is in edit mode, and its working copy. Only ever one
+  // at a time: the grid is the read view and edits are committed before moving
+  // on, so there is no bulk-save to reconcile.
+  const [editingPuzzleId, setEditingPuzzleId] = useState('');
+  const [puzzleDraft, setPuzzleDraft] = useState<{ name: string; sortOrder: number }>({ name: '', sortOrder: 0 });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -196,14 +210,102 @@ export default function AdminJigsawPage() {
   const updateDraft = (patch: Partial<PackDraft>) =>
     setDraft((cur) => (cur ? { ...cur, ...patch } : cur));
 
+  // Both entry points clear the half-typed collection box and any open puzzle
+  // edit: leaving them mounted would carry a draft from the pack being left onto
+  // the pack being opened.
   const selectPack = (pack: JigsawPack) => {
     setSelectedId(pack.packItemId);
     setDraft(draftFromPack(pack, packItems.find((it) => it.itemId === pack.itemId)));
+    setNewCollection(null);
+    setEditingPuzzleId('');
   };
 
   const newPack = () => {
     setSelectedId('');
     setDraft(emptyDraft(packs));
+    setNewCollection(null);
+    setEditingPuzzleId('');
+  };
+
+  /**
+   * File the open pack under a newly minted collection key.
+   *
+   * Nothing is written here: a collection has no table of its own, so it exists
+   * precisely when some pack carries its key. This only fills the draft — the
+   * key is created by saving the pack, and abandoning the editor invents nothing.
+   */
+  const commitNewCollection = () => {
+    const key = slugify(newCollection ?? '');
+    if (!key) { setNewCollection(null); return; }
+    updateDraft({ collection: key });
+    setNewCollection(null);
+  };
+
+  /**
+   * Re-file every pack on `from` onto `to`.
+   *
+   * A rename is a bulk edit rather than a single write for the same reason:
+   * the key lives in a column on each pack, so the collection *is* its members.
+   * Sequential on purpose — the lists are short, and one failure part-way leaves
+   * a legible half-moved state rather than an unordered scatter of failures.
+   */
+  const renameCollection = async (from: string, to: string) => {
+    const key = slugify(to);
+    if (!key || key === from) return;
+    const affected = packs.filter((p) => (p.collection ?? '') === from);
+    setSaving(true);
+    setError('');
+    try {
+      for (const pack of affected) {
+        // slug is required by the RPC and is what identifies the row on the
+        // update path, so it is echoed back unchanged. Every other field is left
+        // undefined: this is a PATCH and must not touch a price or a cover.
+        await adminUpsertPack({ packId: pack.packItemId, slug: pack.slug, collection: key });
+      }
+      if (draft && draft.collection === from) updateDraft({ collection: key });
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to rename collection');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const startEditPuzzle = (puzzle: JigsawPuzzle) => {
+    setEditingPuzzleId(puzzle.puzzleId);
+    setPuzzleDraft({ name: puzzle.name || puzzle.slug || '', sortOrder: puzzle.sortOrder });
+  };
+
+  /**
+   * Rename / re-order one puzzle.
+   *
+   * The slug is echoed back rather than re-derived from the new name. It is the
+   * key the uploader matches on when the same filename is dropped again, so
+   * renaming "Img 1" to "Cable Car Bay" must not repoint that match — otherwise
+   * re-uploading the original file would fork a second row instead of replacing
+   * the art on this one.
+   */
+  const savePuzzleEdit = async (puzzle: JigsawPuzzle) => {
+    if (!draft?.packId) return;
+    const name = puzzleDraft.name.trim();
+    if (!name) { setError('Puzzle name is required.'); return; }
+    setBusyPuzzleId(puzzle.puzzleId);
+    setError('');
+    try {
+      await adminUpsertPuzzle({
+        puzzleId: puzzle.puzzleId,
+        slug: puzzle.slug || slugify(name),
+        packId: draft.packId,
+        name,
+        sortOrder: puzzleDraft.sortOrder,
+      });
+      setEditingPuzzleId('');
+      await loadPuzzles();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save puzzle');
+    } finally {
+      setBusyPuzzleId('');
+    }
   };
 
   const savePack = async () => {
@@ -391,9 +493,18 @@ export default function AdminJigsawPage() {
   };
 
   // A pack may hold a collection key this build has never heard of — the column
-  // is free text. Render it as its own option rather than snapping the pack onto
-  // the first curated key, which would silently re-file it on the next save.
+  // is free text, and the editor can now mint new keys. Render every key in use
+  // rather than snapping the pack onto the first curated one, which would
+  // silently re-file it on the next save.
+  //
+  // Sourced from every pack, not just the open draft: a key invented while
+  // editing pack A has to be offered to pack B, or the second pack in a new
+  // collection can only be filed by typing the key a second time and any typo
+  // forks the collection in two.
   const collectionKeys: string[] = [...COLLECTIONS];
+  for (const key of packs.map((p) => p.collection ?? '')) {
+    if (key && !collectionKeys.includes(key)) collectionKeys.push(key);
+  }
   if (draft?.collection && !collectionKeys.includes(draft.collection)) collectionKeys.push(draft.collection);
 
   const linkedItem = draft?.itemId ? packItems.find((it) => it.itemId === draft.itemId) : undefined;
@@ -496,12 +607,58 @@ export default function AdminJigsawPage() {
             <div className="lg:col-span-4 space-y-2">
               <div>
                 <label className="block text-[11px] text-slate-400 mb-1">Collection</label>
-                <select value={draft.collection} onChange={(e) => updateDraft({ collection: e.target.value })} className={inputCls}>
-                  <option value="">No collection</option>
-                  {collectionKeys.map((key) => (
-                    <option key={key} value={key}>{collectionLabel(key)}</option>
-                  ))}
-                </select>
+                {newCollection === null ? (
+                  <select
+                    value={draft.collection}
+                    onChange={(e) => {
+                      // The sentinel is not a key. It swaps the select for a text
+                      // box; nothing is filed until that box is committed.
+                      if (e.target.value === NEW_COLLECTION) setNewCollection('');
+                      else updateDraft({ collection: e.target.value });
+                    }}
+                    className={inputCls}
+                  >
+                    <option value="">No collection</option>
+                    {collectionKeys.map((key) => (
+                      <option key={key} value={key}>{collectionLabel(key)}</option>
+                    ))}
+                    <option value={NEW_COLLECTION}>+ New collection…</option>
+                  </select>
+                ) : (
+                  <div className="flex gap-2">
+                    <input
+                      autoFocus
+                      value={newCollection}
+                      onChange={(e) => setNewCollection(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') { e.preventDefault(); commitNewCollection(); }
+                        if (e.key === 'Escape') setNewCollection(null);
+                      }}
+                      placeholder="e.g. Winter Nights"
+                      className={inputCls}
+                    />
+                    <button
+                      type="button"
+                      onClick={commitNewCollection}
+                      className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-500 shrink-0"
+                    >
+                      Add
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewCollection(null)}
+                      className="px-3 py-2 rounded-lg bg-slate-700 text-slate-200 text-sm hover:bg-slate-600 shrink-0"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+                {/* The key is what every other pack must match to land on the same
+                    shelf, so show it rather than leaving the admin to guess how
+                    their typing was slugified. */}
+                {newCollection !== null && slugify(newCollection) ? (
+                  <p className="text-[10px] text-slate-500 mt-1">key: {slugify(newCollection)}</p>
+                ) : null}
               </div>
               <div>
                 <label className="block text-[11px] text-slate-400 mb-1">Sort order</label>
@@ -596,7 +753,7 @@ export default function AdminJigsawPage() {
             <h2 className="text-sm font-semibold text-slate-100">
               Puzzles <span className="text-slate-500">({puzzles.length})</span>
             </h2>
-            <JigsawPuzzleUploader packId={draft.packId} packSlug={draft.slug} onUploaded={() => void loadPuzzles()} />
+            <JigsawPuzzleUploader packId={draft.packId} packSlug={draft.slug} existing={puzzles} onUploaded={() => void loadPuzzles()} />
           </div>
 
           {puzzles.length === 0 ? (
@@ -619,7 +776,35 @@ export default function AdminJigsawPage() {
                     )}
                   </div>
                   <div className="p-2 space-y-1 flex-1">
-                    <p className="text-xs font-medium text-slate-100 truncate" title={puzzle.name}>{puzzle.name || puzzle.slug}</p>
+                    {editingPuzzleId === puzzle.puzzleId ? (
+                      <div className="space-y-1.5">
+                        <input
+                          autoFocus
+                          value={puzzleDraft.name}
+                          onChange={(e) => setPuzzleDraft((d) => ({ ...d, name: e.target.value }))}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') { e.preventDefault(); void savePuzzleEdit(puzzle); }
+                            if (e.key === 'Escape') setEditingPuzzleId('');
+                          }}
+                          placeholder="Puzzle name"
+                          className="w-full px-2 py-1 rounded bg-slate-900 border border-slate-600 text-slate-100 text-xs"
+                        />
+                        <label className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                          Order
+                          <input
+                            type="number"
+                            value={puzzleDraft.sortOrder}
+                            onChange={(e) => setPuzzleDraft((d) => ({ ...d, sortOrder: parseInt(e.target.value, 10) || 0 }))}
+                            className="w-16 px-2 py-1 rounded bg-slate-900 border border-slate-600 text-slate-100 text-xs"
+                          />
+                        </label>
+                        {/* The slug is the uploader's match key, so it is shown but
+                            never edited here — see savePuzzleEdit. */}
+                        <p className="text-[10px] text-slate-500 truncate" title={puzzle.slug}>slug: {puzzle.slug}</p>
+                      </div>
+                    ) : (
+                      <p className="text-xs font-medium text-slate-100 truncate" title={puzzle.name}>{puzzle.name || puzzle.slug}</p>
+                    )}
                     {puzzle.imageWidth && puzzle.imageHeight ? (
                       <p className="text-[10px] text-slate-400">{puzzle.imageWidth} × {puzzle.imageHeight}</p>
                     ) : (
@@ -631,34 +816,64 @@ export default function AdminJigsawPage() {
                     {puzzle.isFree && <p className="text-[10px] text-emerald-400">free sampler</p>}
                     {!puzzle.isActive && <p className="text-[10px] text-amber-400">unpublished</p>}
                   </div>
-                  <div className="p-2 pt-0 flex gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => void togglePuzzleFree(puzzle)}
-                      disabled={busyPuzzleId === puzzle.puzzleId}
-                      title={puzzle.isFree ? 'Playable without owning the pack' : 'Needs the pack'}
-                      className="flex-1 px-2 py-1 rounded text-[11px] bg-slate-700 text-slate-100 hover:bg-slate-600 disabled:opacity-50"
-                    >
-                      {busyPuzzleId === puzzle.puzzleId ? '…' : puzzle.isFree ? 'Free' : 'Locked'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void togglePuzzleActive(puzzle)}
-                      disabled={busyPuzzleId === puzzle.puzzleId}
-                      className="flex-1 px-2 py-1 rounded text-[11px] bg-slate-700 text-slate-100 hover:bg-slate-600 disabled:opacity-50"
-                    >
-                      {busyPuzzleId === puzzle.puzzleId ? '…' : puzzle.isActive ? 'Unpublish' : 'Restore'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void deletePuzzle(puzzle)}
-                      disabled={busyPuzzleId === puzzle.puzzleId}
-                      title="Delete the puzzle and every board started on it"
-                      className="px-2 py-1 rounded text-[11px] bg-red-900/60 text-red-200 hover:bg-red-900 disabled:opacity-50"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                  {editingPuzzleId === puzzle.puzzleId ? (
+                    <div className="p-2 pt-0 flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => void savePuzzleEdit(puzzle)}
+                        disabled={busyPuzzleId === puzzle.puzzleId}
+                        className="flex-1 px-2 py-1 rounded text-[11px] bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50"
+                      >
+                        {busyPuzzleId === puzzle.puzzleId ? 'Saving…' : 'Save'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingPuzzleId('')}
+                        disabled={busyPuzzleId === puzzle.puzzleId}
+                        className="flex-1 px-2 py-1 rounded text-[11px] bg-slate-700 text-slate-100 hover:bg-slate-600 disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="p-2 pt-0 flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => void togglePuzzleFree(puzzle)}
+                        disabled={busyPuzzleId === puzzle.puzzleId}
+                        title={puzzle.isFree ? 'Playable without owning the pack' : 'Needs the pack'}
+                        className="flex-1 px-2 py-1 rounded text-[11px] bg-slate-700 text-slate-100 hover:bg-slate-600 disabled:opacity-50"
+                      >
+                        {busyPuzzleId === puzzle.puzzleId ? '…' : puzzle.isFree ? 'Free' : 'Locked'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void togglePuzzleActive(puzzle)}
+                        disabled={busyPuzzleId === puzzle.puzzleId}
+                        className="flex-1 px-2 py-1 rounded text-[11px] bg-slate-700 text-slate-100 hover:bg-slate-600 disabled:opacity-50"
+                      >
+                        {busyPuzzleId === puzzle.puzzleId ? '…' : puzzle.isActive ? 'Unpublish' : 'Restore'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => startEditPuzzle(puzzle)}
+                        disabled={busyPuzzleId === puzzle.puzzleId}
+                        title="Rename this puzzle or change its order in the pack"
+                        className="px-2 py-1 rounded text-[11px] bg-slate-700 text-slate-100 hover:bg-slate-600 disabled:opacity-50"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void deletePuzzle(puzzle)}
+                        disabled={busyPuzzleId === puzzle.puzzleId}
+                        title="Delete the puzzle and every board started on it"
+                        className="px-2 py-1 rounded text-[11px] bg-red-900/60 text-red-200 hover:bg-red-900 disabled:opacity-50"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -666,9 +881,136 @@ export default function AdminJigsawPage() {
         </div>
       )}
 
+      <CollectionManager packs={packs} busy={saving} onRename={renameCollection} />
+
       <DailySchedule puzzles={puzzles} />
 
       {error && <p className="text-sm text-red-400">{error}</p>}
+    </div>
+  );
+}
+
+// ─── Collections ───
+
+/**
+ * Rename a collection across every pack filed under it.
+ *
+ * There is no collections table: `jigsaw_packs.collection` is a free-text
+ * column, so a collection exists exactly as long as some pack names it and
+ * renaming one means rewriting all of its members. That also makes the empty
+ * state honest — a collection with no packs is not "empty", it is gone, which
+ * is why this lists what is in use rather than the curated key list.
+ *
+ * Creating a collection is deliberately NOT here. A new key with no pack on it
+ * would vanish on reload, so the only place it can be minted is the pack editor,
+ * where a pack is there to carry it.
+ */
+function CollectionManager({
+  packs,
+  busy,
+  onRename,
+}: {
+  packs: JigsawPack[];
+  busy: boolean;
+  onRename: (from: string, to: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState('');
+  const [value, setValue] = useState('');
+
+  // Key → pack count, in first-seen order. Packs with no collection are counted
+  // separately below rather than filed under '': "unfiled" is not a shelf and
+  // must not be renamable into one.
+  const counts = new Map<string, number>();
+  for (const pack of packs) {
+    const key = pack.collection ?? '';
+    if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const unfiled = packs.filter((p) => !(p.collection ?? '')).length;
+
+  const commit = async (from: string) => {
+    const next = slugify(value);
+    if (!next || next === from) { setEditing(''); return; }
+    await onRename(from, next);
+    setEditing('');
+  };
+
+  return (
+    <div className="p-4 rounded-xl bg-slate-800 border border-slate-700 space-y-3">
+      <div>
+        <h2 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+          <FolderTree className="w-4 h-4" /> Collections
+        </h2>
+        <p className="text-[11px] text-slate-400 mt-1">
+          The shop&apos;s filter chips. A collection is just a tag every pack in it carries, so renaming one re-files all of its packs and a collection with no packs left stops existing. Add one from a pack&apos;s Collection field.
+        </p>
+      </div>
+
+      {counts.size === 0 ? (
+        <p className="text-xs text-slate-400">No collections in use yet.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {[...counts.entries()].map(([key, count]) => (
+            <div key={key} className="flex items-center gap-2 flex-wrap">
+              {editing === key ? (
+                <>
+                  <input
+                    autoFocus
+                    value={value}
+                    onChange={(e) => setValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') { e.preventDefault(); void commit(key); }
+                      if (e.key === 'Escape') setEditing('');
+                    }}
+                    className="px-2 py-1 rounded bg-slate-900 border border-slate-600 text-slate-100 text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void commit(key)}
+                    disabled={busy}
+                    className="px-2 py-1 rounded text-[11px] bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50"
+                  >
+                    {busy ? 'Saving…' : `Rename ${count} pack${count === 1 ? '' : 's'}`}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditing('')}
+                    disabled={busy}
+                    className="px-2 py-1 rounded text-[11px] bg-slate-700 text-slate-200 hover:bg-slate-600 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  {slugify(value) && slugify(value) !== key ? (
+                    <span className="text-[10px] text-slate-500">key: {slugify(value)}</span>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <span className="text-xs text-slate-100">{collectionLabel(key)}</span>
+                  <span className="text-[10px] text-slate-500">{key}</span>
+                  <span className="text-[10px] text-slate-400">
+                    {count} pack{count === 1 ? '' : 's'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => { setEditing(key); setValue(collectionLabel(key)); }}
+                    disabled={busy}
+                    title="Rename this collection and re-file every pack in it"
+                    className="px-2 py-1 rounded text-[11px] bg-slate-700 text-slate-200 hover:bg-slate-600 disabled:opacity-50 flex items-center gap-1"
+                  >
+                    <Pencil className="w-3 h-3" /> Rename
+                  </button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {unfiled > 0 && (
+        <p className="text-[11px] text-slate-500">
+          {unfiled} pack{unfiled === 1 ? '' : 's'} with no collection.
+        </p>
+      )}
     </div>
   );
 }
