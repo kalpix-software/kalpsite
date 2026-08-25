@@ -563,7 +563,12 @@ export default function AdminStorePage() {
   const [error, setError] = useState('');
   const [editing, setEditing] = useState<StoreItem | null>(null);
   const [saving, setSaving] = useState(false);
-  const [filter, setFilter] = useState({ upgradeType: '', category: '', subcategory: '' });
+  const [filter, setFilter] = useState({ upgradeType: '', category: '', subcategory: '', search: '' });
+  // Debounced separately from `filter.search` so typing does not fire one
+  // store/get_items per keystroke. This list is server-paged, so the search has
+  // to be a request parameter — filtering the 50 rows already on screen would
+  // silently miss every match on page 2.
+  const [searchInput, setSearchInput] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
 
@@ -576,6 +581,7 @@ export default function AdminStorePage() {
         upgradeType: filter.upgradeType || undefined,
         category: filter.category || undefined,
         subcategory: filter.subcategory || undefined,
+        search: filter.search || undefined,
         includeInactive: true,
         limit: pageSize,
         cursor: offset > 0 ? btoa(String(offset)) : undefined,
@@ -596,11 +602,21 @@ export default function AdminStorePage() {
     } finally {
       setLoading(false);
     }
-  }, [filter.upgradeType, filter.category, filter.subcategory, page, pageSize]);
+  }, [filter.upgradeType, filter.category, filter.subcategory, filter.search, page, pageSize]);
 
   useEffect(() => {
     loadItems();
   }, [loadItems]);
+
+  // Commit the search box 350ms after typing stops, and reset to page 1 — the
+  // result set changes size, so holding page 7 would land on an empty screen.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setFilter((f) => (f.search === searchInput ? f : { ...f, search: searchInput }));
+      setPage((p) => (p === 1 ? p : 1));
+    }, 350);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const startItem = total === 0 ? 0 : (page - 1) * pageSize + 1;
@@ -706,9 +722,28 @@ export default function AdminStorePage() {
           }}
           className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-slate-100 text-sm w-40"
         />
+        <input
+          type="search"
+          placeholder="Search item name…"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 text-slate-100 text-sm w-52"
+        />
         <button onClick={loadItems} className="px-4 py-2 rounded-lg bg-slate-700 text-slate-200 text-sm hover:bg-slate-600">
           Refresh
         </button>
+        {(filter.upgradeType || filter.category || filter.subcategory || searchInput) && (
+          <button
+            onClick={() => {
+              setSearchInput('');
+              setFilter({ upgradeType: '', category: '', subcategory: '', search: '' });
+              setPage(1);
+            }}
+            className="px-3 py-2 rounded-lg bg-slate-700 text-slate-200 text-sm hover:bg-slate-600"
+          >
+            Clear
+          </button>
+        )}
       </div>
 
       {error && <p className="mb-4 text-sm text-red-400">{error}</p>}

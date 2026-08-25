@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { CalendarDays, FolderTree, Pencil, Plus, Power, Puzzle, RefreshCw, Save, Trash2 } from 'lucide-react';
+import { CalendarDays, Filter, FolderTree, Pencil, Plus, Power, Puzzle, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { callAdminRpc, unwrapAdminRpcData } from '@/lib/admin-rpc';
 import {
   AdminDailyEntry,
@@ -42,6 +42,50 @@ const inputCls = 'w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-6
 // slugify() output — that function emits only [a-z0-9_], so no typed collection
 // name can ever collide with this and be mistaken for the sentinel.
 const NEW_COLLECTION = '__new__';
+
+// Sentinels for the collection filter. Neither is a legal slugify() output — it
+// emits only [a-z0-9_] — so a real collection key can never be mistaken for one.
+const FILTER_ANY = '__any__';
+const FILTER_NONE = '__none__';
+
+/**
+ * The non-collection ways an admin needs to slice the pack list.
+ *
+ * These deliberately mirror the player's shop chips — the four synthetic ones
+ * (sale / unique / popular) plus the two states only an admin can see (draft and
+ * free). Matching the player's vocabulary is the point: "which packs does the
+ * UNIQUE chip show?" has to be answerable here without translating it into a
+ * rarity value first.
+ */
+type FacetKey = 'all' | 'active' | 'inactive' | 'free' | 'paid' | 'sale' | 'unique' | 'popular';
+
+const FACETS: { key: FacetKey; label: string; hint: string }[] = [
+  { key: 'all', label: 'All', hint: 'Every pack, published or not' },
+  { key: 'active', label: 'Published', hint: 'Visible to players' },
+  { key: 'inactive', label: 'Unpublished', hint: 'Hidden from the shop and shelf; owners keep access' },
+  { key: 'free', label: 'Free', hint: 'No store item — free for everyone' },
+  { key: 'paid', label: 'Paid', hint: 'Linked to a store item' },
+  { key: 'sale', label: 'On sale', hint: "Discounted — the player's SALE chip" },
+  { key: 'unique', label: 'Unique', hint: "Legendary rarity — the player's UNIQUE chip" },
+  { key: 'popular', label: 'Popular', hint: "metadata.popular is set — the player's POPULAR chip" },
+];
+
+/** Whether one pack passes one facet. Mirrors the server's chip SQL. */
+function matchesFacet(pack: JigsawPack, facet: FacetKey): boolean {
+  switch (facet) {
+    case 'active': return pack.isActive;
+    case 'inactive': return !pack.isActive;
+    case 'free': return pack.isFree;
+    case 'paid': return !pack.isFree;
+    // Read off the badge the server already computed rather than re-deriving it
+    // from price maths here. Two implementations of "is this discounted" drift,
+    // and the admin's answer disagreeing with the shop's is the worst outcome.
+    case 'sale': return (pack.badges ?? []).includes('sale');
+    case 'unique': return pack.rarity === 'legendary';
+    case 'popular': return pack.isPopular === true;
+    default: return true;
+  }
+}
 
 // ─── Types ───
 
@@ -148,6 +192,13 @@ export default function AdminJigsawPage() {
   // on, so there is no bulk-save to reconcile.
   const [editingPuzzleId, setEditingPuzzleId] = useState('');
   const [puzzleDraft, setPuzzleDraft] = useState<{ name: string; sortOrder: number }>({ name: '', sortOrder: 0 });
+  // Pack list filters. Client-side on purpose: admin_list_packs carries no LIMIT
+  // and returns the whole catalogue in one read, so every pack is already here.
+  // (The player-facing shop is the opposite — it pages at 24, which is why its
+  // chip filter has to be a server parameter.)
+  const [filterCollection, setFilterCollection] = useState(FILTER_ANY);
+  const [filterFacet, setFilterFacet] = useState<FacetKey>('all');
+  const [query, setQuery] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -507,6 +558,28 @@ export default function AdminJigsawPage() {
   }
   if (draft?.collection && !collectionKeys.includes(draft.collection)) collectionKeys.push(draft.collection);
 
+  const q = query.trim().toLowerCase();
+  const visiblePacks = packs.filter((pack) => {
+    if (filterCollection === FILTER_NONE && (pack.collection ?? '')) return false;
+    if (filterCollection !== FILTER_ANY && filterCollection !== FILTER_NONE
+        && (pack.collection ?? '') !== filterCollection) return false;
+    if (!matchesFacet(pack, filterFacet)) return false;
+    if (q && !`${pack.name} ${pack.slug}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  // Counted over `packs`, never `visiblePacks`: a facet count that shrank as you
+  // narrowed the collection would make the numbers unreadable — you could never
+  // tell whether "Popular 0" meant no popular packs or none in this collection.
+  const facetCount = (key: FacetKey) => packs.filter((p) => matchesFacet(p, key)).length;
+  const collectionCount = (key: string) =>
+    key === FILTER_NONE
+      ? packs.filter((p) => !(p.collection ?? '')).length
+      : packs.filter((p) => (p.collection ?? '') === key).length;
+  const filtered = visiblePacks.length !== packs.length;
+  // The open pack can sit outside the current filter — selecting it and then
+  // narrowing shouldn't slam the editor shut on unsaved edits.
+  const selectedHidden = !!draft?.packId && !visiblePacks.some((p) => p.packItemId === draft.packId);
+
   const linkedItem = draft?.itemId ? packItems.find((it) => it.itemId === draft.itemId) : undefined;
   const packSlug = draft ? slugify(draft.slug || draft.name) : '';
 
@@ -531,10 +604,85 @@ export default function AdminJigsawPage() {
         </button>
       </div>
 
+      {/* Filters. Mirrors the player's chip row so "what does the shop show
+          under MYSTERY?" is answerable here without translating anything. */}
+      {packs.length > 0 && (
+        <div className="p-3 rounded-xl bg-slate-800 border border-slate-700 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-slate-400 flex items-center gap-1">
+              <Filter className="w-3.5 h-3.5" /> Collection
+            </span>
+            <select
+              value={filterCollection}
+              onChange={(e) => setFilterCollection(e.target.value)}
+              className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-xs"
+            >
+              <option value={FILTER_ANY}>Any ({packs.length})</option>
+              {collectionKeys
+                .filter((key) => collectionCount(key) > 0)
+                .map((key) => (
+                  <option key={key} value={key}>{collectionLabel(key)} ({collectionCount(key)})</option>
+                ))}
+              <option value={FILTER_NONE}>No collection ({collectionCount(FILTER_NONE)})</option>
+            </select>
+
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search name or slug…"
+              className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-xs flex-1 min-w-[10rem]"
+            />
+
+            {filtered && (
+              <button
+                type="button"
+                onClick={() => { setFilterCollection(FILTER_ANY); setFilterFacet('all'); setQuery(''); }}
+                className="px-2 py-1 rounded-lg bg-slate-700 text-slate-200 text-xs hover:bg-slate-600"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            {FACETS.map(({ key, label, hint }) => {
+              const n = facetCount(key);
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setFilterFacet(key)}
+                  title={hint}
+                  disabled={n === 0 && key !== 'all'}
+                  className={`px-2 py-1 rounded text-[11px] ${
+                    filterFacet === key ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-200 hover:bg-slate-600'
+                  } disabled:opacity-40 disabled:cursor-not-allowed`}
+                >
+                  {label} <span className="opacity-70">{n}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <p className="text-[11px] text-slate-400">
+            Showing <strong className="text-slate-200">{visiblePacks.length}</strong> of {packs.length} packs
+            {visiblePacks.length > 0 && (
+              <> · {visiblePacks.reduce((n, p) => n + p.puzzleCount, 0)} puzzles</>
+            )}
+            {selectedHidden && (
+              <span className="text-amber-400"> · the open pack is outside this filter</span>
+            )}
+          </p>
+        </div>
+      )}
+
       {/* Pack selector */}
       <div className="flex flex-wrap gap-2 items-center">
         <span className="text-xs text-slate-400">Pack</span>
-        {packs.map((pack) => (
+        {visiblePacks.length === 0 && packs.length > 0 && (
+          <span className="text-xs text-slate-500">No pack matches this filter.</span>
+        )}
+        {visiblePacks.map((pack) => (
           <button
             key={pack.packItemId}
             type="button"

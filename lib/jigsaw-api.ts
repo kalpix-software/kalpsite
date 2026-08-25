@@ -123,6 +123,12 @@ export interface JigsawPack {
   rarity?: string;
   badges?: string[];
   releasedAt?: number;
+  /**
+   * The admin-set `popular` flag from jigsaw_packs.metadata. Pack-level rather
+   * than a store-item property, which is why a free pack can carry it. Backs
+   * both the POPULAR shop chip and the POPULAR tile badge.
+   */
+  isPopular?: boolean;
   /** Per-user; zero on the admin list, which reads nobody's progress. */
   completedCount: number;
   inProgressCount: number;

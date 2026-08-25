@@ -6,6 +6,7 @@ import { callAdminRpc, unwrapAdminRpcData } from '@/lib/admin-rpc';
 import TeroBackgroundUploader from '@/components/admin/TeroBackgroundUploader';
 import DeckVariantUploader from '@/components/admin/DeckVariantUploader';
 import ChessCosmeticUploader from '@/components/admin/ChessCosmeticUploader';
+import JigsawCosmeticUploader from '@/components/admin/JigsawCosmeticUploader';
 
 // One entry point for every game's purchasable cosmetics: pick a game, pick a
 // cosmetic type, upload, and see what already exists.
@@ -20,6 +21,9 @@ import ChessCosmeticUploader from '@/components/admin/ChessCosmeticUploader';
 //   chess / pieces     → metadata.baseUrl, a folder of 12 FEN-named sprites
 //   chess / board      → metadata.assetUrl
 //   chess / background → metadata.assetUrl
+//   jigsaw / board     → metadata.textureUrl + metadata.swatch, and option_id
+//                        as the durable id a live session names
+//   jigsaw / piece_shape → option_id only; the cut itself is client-drawn
 //
 // A generic "upload a file, set a price" form cannot satisfy those at once —
 // that is exactly how backgrounds without an assetUrl got created.
@@ -36,6 +40,8 @@ type ShopLabel = {
 type StoreItemRow = {
   itemId: string;
   slug?: string;
+  /** The durable cosmetic id for jigsaw boards/shapes; absent on other games. */
+  optionId?: string;
   name: string;
   description?: string;
   previewUrl?: string;
@@ -51,7 +57,7 @@ type CosmeticKind = {
   key: string;
   label: string;
   /** Which metadata field must be present for the item to actually render. */
-  requires?: 'assetUrl' | 'baseUrl';
+  requires?: 'assetUrl' | 'baseUrl' | 'textureUrl';
   note: string;
 };
 
@@ -79,6 +85,37 @@ const COSMETICS_BY_GAME: Record<string, CosmeticKind[]> = {
     { key: 'board', label: 'Boards', requires: 'assetUrl', note: 'One item per file. Only you see it.' },
     { key: 'background', label: 'Backgrounds', requires: 'assetUrl', note: 'The surface around the board. Only you see it.' },
   ],
+  jigsaw: [
+    {
+      key: 'board',
+      label: 'Boards',
+      requires: 'textureUrl',
+      note: 'The surface the pieces sit on. metadata.textureUrl is what renders; metadata.swatch is the flat colour drawn under it while that image loads.',
+    },
+    {
+      key: 'piece_shape',
+      label: 'Shapes',
+      note: 'The cut silhouette in the settings sheet picker. No texture and no swatch — the client draws the actual cut from the algorithm.',
+    },
+  ],
+};
+
+/**
+ * Jigsaw cosmetic ids the server ships compiled-in and always owns.
+ *
+ * Listed here so the grid can show the full picker a player sees, not just the
+ * purchasable half — and so the collision these cause is visible. An uploaded
+ * item reusing one of these ids is dropped by cosmetics(), silently.
+ */
+const JIGSAW_BUILT_INS: Record<string, { id: string; name: string; swatch?: string }[]> = {
+  board: [
+    { id: 'oak', name: 'Oak', swatch: '#A08056' },
+    { id: 'walnut', name: 'Walnut', swatch: '#5B4530' },
+  ],
+  piece_shape: [
+    { id: 'classic', name: 'Classic' },
+    { id: 'square', name: 'Square' },
+  ],
 };
 
 export default function CosmeticsPage() {
@@ -86,6 +123,8 @@ export default function CosmeticsPage() {
   const [gameSlug, setGameSlug] = useState('');
   const [kindKey, setKindKey] = useState('');
   const [items, setItems] = useState<StoreItemRow[]>([]);
+  // All jigsaw cosmetic ids, both types — see load(). Empty for other games.
+  const [jigsawIds, setJigsawIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState('');
   const [error, setError] = useState('');
@@ -127,7 +166,23 @@ export default function CosmeticsPage() {
         JSON.stringify({ upgradeType: 'game_upgrade', category: gameSlug, includeInactive: true, limit: 200 }),
       );
       const data = unwrapAdminRpcData<{ items?: StoreItemRow[] }>(raw);
-      setItems((data?.items ?? []).filter((it) => (it.subcategory ?? it.type) === kindKey));
+      const all = data?.items ?? [];
+      setItems(all.filter((it) => (it.subcategory ?? it.type) === kindKey));
+      // Collected BEFORE the kind filter and across both jigsaw types: the
+      // uploader's duplicate check has to span shapes and boards together,
+      // because cosmetics() dedupes them in one shared map.
+      setJigsawIds(
+        gameSlug === 'jigsaw'
+          ? all
+              .filter((it) => {
+                const t = it.subcategory ?? it.type;
+                return t === 'board' || t === 'piece_shape';
+              })
+              // Mirrors COALESCE(NULLIF(option_id,''), slug) server-side.
+              .map((it) => it.optionId || it.slug || '')
+              .filter(Boolean)
+          : [],
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load items');
     } finally {
@@ -229,6 +284,13 @@ export default function CosmeticsPage() {
     if (gameSlug === 'tero' && kindKey === 'background') return <TeroBackgroundUploader onUploaded={() => void load()} />;
     if (gameSlug === 'tero' && kindKey === 'card_decks') return <DeckVariantUploader onUploaded={() => void load()} />;
     if (gameSlug === 'chess') return <ChessCosmeticUploader onUploaded={() => void load()} />;
+    // Both jigsaw kinds share one uploader: it carries its own Boards/Shapes
+    // toggle, because the collision check spans BOTH types — cosmetics() dedupes
+    // ids across shapes and boards in a single map, so a board id must not
+    // collide with a shape id either.
+    if (gameSlug === 'jigsaw') {
+      return <JigsawCosmeticUploader existingIds={jigsawIds} onUploaded={() => void load()} />;
+    }
     return null;
   }
 
@@ -369,6 +431,25 @@ export default function CosmeticsPage() {
         </p>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+          {/* Jigsaw's free defaults, read-only. Shown because they are part of
+              the picker a player sees but are compiled into the binary, not
+              rows — and because an upload reusing one of these ids is dropped
+              silently, so the names have to be visible somewhere. */}
+          {gameSlug === 'jigsaw' && (JIGSAW_BUILT_INS[kindKey] ?? []).map((b) => (
+            <div key={b.id} className="rounded-lg bg-slate-800/60 border border-dashed border-slate-600 overflow-hidden">
+              <div
+                className="aspect-square flex items-center justify-center"
+                style={b.swatch ? { backgroundColor: b.swatch } : undefined}
+              >
+                {!b.swatch && <span className="text-xs text-slate-600">bundled art</span>}
+              </div>
+              <div className="p-2 space-y-0.5">
+                <p className="text-xs font-medium text-slate-100">{b.name}</p>
+                <p className="text-[10px] text-slate-500 font-mono">{b.id}</p>
+                <p className="text-[10px] text-emerald-400">free default · always owned</p>
+              </div>
+            </div>
+          ))}
           {items.map((it) => {
             const assetUrl = it.metadata?.assetUrl ?? '';
             const mediaType = it.metadata?.mediaType ?? '';
