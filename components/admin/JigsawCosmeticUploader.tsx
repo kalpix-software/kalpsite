@@ -3,6 +3,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Plus, Upload } from 'lucide-react';
 import { callAdminRpc, unwrapAdminRpcData } from '@/lib/admin-rpc';
+import {
+  type ProfileSegment,
+  buildPiecePath,
+  normalizeProfile,
+} from '@/lib/jigsaw-profile';
 
 // Jigsaw cosmetic uploader — board surfaces and piece shapes.
 //
@@ -58,6 +63,14 @@ interface UploadEntry {
   name: string;
   /** Average colour of the image, hex. Boards only; prefilled, editable. */
   swatch: string;
+  /** The tab curve as pasted (shapes only). Empty = cuts as the classic knob. */
+  curve: string;
+  /** The normalised string that actually gets saved to metadata.profile. */
+  curveNormalized?: string;
+  /** Parsed segments backing the interlock preview. */
+  curveSegments?: ProfileSegment[];
+  curveError?: string;
+  curveNotices?: string[];
 }
 
 const CONTENT_TYPE_BY_EXT: Record<string, string> = {
@@ -171,6 +184,58 @@ async function presignAndPut(mode: Mode, file: File): Promise<string> {
 
 const inputCls = 'px-2 py-1 rounded bg-slate-900 border border-slate-600 text-slate-100 text-xs';
 
+/**
+ * Two pieces cut with the curve, interlocked across their shared boundary —
+ * the left one carrying the tab, the right one the hole. Drawn with the same
+ * replay maths the game uses, so a curve that looks mated here IS mated on the
+ * board; a bad curve is obvious before it ships to a single client.
+ */
+function ShapeInterlockPreview({ segments }: { segments: ProfileSegment[] }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const cell = { w: 110, h: 110 };
+    // The client's exact tabRatio (0.26), so the preview's proportions are the
+    // board's proportions.
+    const tab = 110 * 0.26;
+    const a = buildPiecePath(
+      cell,
+      tab,
+      { top: 'flat', right: 'tab', bottom: 'flat', left: 'flat' },
+      segments,
+      { x: 8, y: 8 },
+    );
+    const b = buildPiecePath(
+      cell,
+      tab,
+      { top: 'flat', right: 'flat', bottom: 'flat', left: 'blank' },
+      segments,
+      { x: 8 + cell.w, y: 8 },
+    );
+    ctx.fillStyle = 'rgba(129, 140, 248, 0.55)';
+    ctx.fill(a);
+    ctx.fillStyle = 'rgba(52, 211, 153, 0.55)';
+    ctx.fill(b);
+    ctx.strokeStyle = 'rgba(226, 232, 240, 0.9)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke(a);
+    ctx.stroke(b);
+  }, [segments]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={300}
+      height={178}
+      className="rounded-lg bg-slate-900 border border-slate-700"
+    />
+  );
+}
+
 export default function JigsawCosmeticUploader({
   existingIds,
   onUploaded,
@@ -220,6 +285,7 @@ export default function JigsawCosmeticUploader({
         optionId: id,
         name: titleize(stem),
         swatch: '#000000',
+        curve: '',
         previewObjectUrl: URL.createObjectURL(file),
       };
     });
@@ -243,6 +309,41 @@ export default function JigsawCosmeticUploader({
   const patch = (i: number, p: Partial<UploadEntry>) =>
     setEntries((cur) => cur.map((e, n) => (n === i ? { ...e, ...p } : e)));
 
+  /** Which entry's curve the preview canvas is showing. */
+  const [previewIndex, setPreviewIndex] = useState(0);
+
+  const setCurve = (i: number, raw: string) => {
+    setPreviewIndex(i);
+    if (raw.trim() === '') {
+      patch(i, {
+        curve: raw,
+        curveNormalized: undefined,
+        curveSegments: undefined,
+        curveError: undefined,
+        curveNotices: undefined,
+      });
+      return;
+    }
+    const result = normalizeProfile(raw);
+    if ('error' in result) {
+      patch(i, {
+        curve: raw,
+        curveNormalized: undefined,
+        curveSegments: undefined,
+        curveError: result.error,
+        curveNotices: undefined,
+      });
+      return;
+    }
+    patch(i, {
+      curve: raw,
+      curveNormalized: result.path,
+      curveSegments: result.segments,
+      curveError: undefined,
+      curveNotices: result.notices,
+    });
+  };
+
   const collisionFor = (entry: UploadEntry): string => {
     const id = slugify(entry.optionId);
     if (!id) return 'an id is required';
@@ -259,6 +360,11 @@ export default function JigsawCosmeticUploader({
     });
     if (blocking) {
       setError('Fix the highlighted ids first — a built-in id is silently ignored by the server.');
+      return;
+    }
+    if (mode === 'piece_shape' &&
+        entries.some((e) => e.curve.trim() !== '' && e.curveError)) {
+      setError('Fix the highlighted tab curves first — an invalid curve would ship to every client.');
       return;
     }
     if (priceCoins <= 0 && priceGems <= 0) {
@@ -311,7 +417,15 @@ export default function JigsawCosmeticUploader({
             // server-side, but setting it explicitly leaves the shop thumbnail
             // free to diverge from the full-res surface later.
             ? { purchaseLimit: '1', textureUrl: publicUrl, swatch: entry.swatch }
-            : { purchaseLimit: '1' },
+            : {
+                purchaseLimit: '1',
+                // The normalised curve, never the paste: what ships is what the
+                // client parser was built to accept, and the client cuts
+                // classic on anything else.
+                ...(entry.curveNormalized
+                  ? { profile: entry.curveNormalized }
+                  : {}),
+              },
         }));
         entry.publicUrl = publicUrl;
         entry.status = 'done';
@@ -386,9 +500,11 @@ export default function JigsawCosmeticUploader({
           </>
         ) : (
           <>
-            One image per piece shape — a silhouette of the cut, shown in the settings sheet picker. Shapes
-            carry no texture and no swatch: the shape itself is drawn by the client from the cut algorithm,
-            and this image only has to make the option recognisable.
+            One image per piece shape — a silhouette of the cut, shown in the settings sheet picker.
+            The <strong>Tab curve</strong> is the shape itself: draw one curve in Figma from the left end
+            of a horizontal line to the right end, bump upward, copy as SVG and paste it here. Any size,
+            position or slant is fine — it is normalised onto the edge automatically, and the preview below
+            shows the two sides of a boundary interlocking. Left empty, the shape cuts as the classic knob.
           </>
         )}
       </p>
@@ -425,6 +541,14 @@ export default function JigsawCosmeticUploader({
                   Cosmetic id
                 </th>
                 {mode === 'board' && <th className="px-2 py-1 text-left">Swatch</th>}
+                {mode === 'piece_shape' && (
+                  <th
+                    className="px-2 py-1 text-left"
+                    title="The tab curve, as an SVG path (M/L/C). Draw it in Figma from the left end of a horizontal line to the right end, bump upward, and paste. Empty cuts as the classic knob."
+                  >
+                    Tab curve (SVG)
+                  </th>
+                )}
                 <th className="px-2 py-1 text-left">File</th>
                 <th className="px-2 py-1 text-left">Status</th>
               </tr>
@@ -468,6 +592,24 @@ export default function JigsawCosmeticUploader({
                         </div>
                       </td>
                     )}
+                    {mode === 'piece_shape' && (
+                      <td className="px-2 py-1">
+                        <input
+                          value={e.curve}
+                          disabled={uploading}
+                          onFocus={() => setPreviewIndex(i)}
+                          onChange={(ev) => setCurve(i, ev.target.value)}
+                          placeholder="M 0 0 … L 1 0  (empty = classic)"
+                          className={`${inputCls} w-48 font-mono ${e.curveError ? 'border-red-500' : ''}`}
+                        />
+                        {e.curveError && (
+                          <p className="text-[10px] text-red-400 mt-0.5 max-w-[14rem]">{e.curveError}</p>
+                        )}
+                        {e.curveNotices?.map((notice) => (
+                          <p key={notice} className="text-[10px] text-amber-400 mt-0.5 max-w-[14rem]">{notice}</p>
+                        ))}
+                      </td>
+                    )}
                     <td className="px-2 py-1 text-slate-400">
                       {e.file.name} · {prettyBytes(e.file.size)}
                     </td>
@@ -492,6 +634,20 @@ export default function JigsawCosmeticUploader({
           </table>
         </div>
       )}
+
+      {mode === 'piece_shape' &&
+        entries[previewIndex]?.curveSegments != null && (
+          <div className="flex items-start gap-3">
+            <ShapeInterlockPreview
+              segments={entries[previewIndex].curveSegments!}
+            />
+            <p className="text-[11px] text-slate-400 max-w-[16rem]">
+              The two sides of one boundary, cut with this curve. If they read
+              as one seam here, they interlock on every board — this preview
+              runs the same replay the game does.
+            </p>
+          </div>
+        )}
 
       {error && <p className="text-xs text-red-400">{error}</p>}
       {createdCount !== null && createdCount > 0 && (

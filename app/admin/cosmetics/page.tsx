@@ -95,7 +95,7 @@ const COSMETICS_BY_GAME: Record<string, CosmeticKind[]> = {
     {
       key: 'piece_shape',
       label: 'Shapes',
-      note: 'The cut silhouette in the settings sheet picker. No texture and no swatch — the client draws the actual cut from the algorithm.',
+      note: 'metadata.profile is the tab curve the client cuts with — paste it in the uploader, which normalises and previews it. A shape without one cuts as the classic knob.',
     },
   ],
 };
