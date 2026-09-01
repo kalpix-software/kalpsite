@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  LayoutDashboard, Store, RefreshCw, LogOut, BarChart3, Package,
+  LayoutDashboard, Store, RefreshCw,
+  Search, LogOut, BarChart3, Package,
   CalendarCheck, Tag, Swords, Trophy, Gift, ChevronDown, ChevronRight,
   MessageSquare, Gamepad2, Users, Flag, MessageCircleWarning, Palette,
   Sparkles, TrendingUp, ImageIcon, Coins, ShieldCheck, Sofa, Newspaper,
@@ -98,6 +99,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         { href: '/admin/sync', label: 'Avatars', icon: RefreshCw },
         { href: '/admin/games', label: 'Games', icon: Gamepad2 },
         { href: '/admin/jigsaw', label: 'Jigsaw Puzzles', icon: Puzzle },
+        { href: '/admin/hidden', label: 'Hidden Object', icon: Search },
         { href: '/admin/backgrounds', label: 'Avatar Backgrounds', icon: ImageIcon },
         // Game Cosmetics covers chess too, so /admin/chess-cosmetics is no
         // longer linked. The route stays so existing bookmarks keep working.
