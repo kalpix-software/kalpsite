@@ -158,6 +158,24 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   'jigsaw/admin_delete_puzzle',
   'jigsaw/admin_list_daily',
   'jigsaw/admin_set_daily',
+  // Hidden Object — packs, scenes, the level ladder, the one-upload ingest
+  // flow and bundle publishing. admin_ingest_begin only mints a presigned PUT;
+  // the zip goes browser -> R2 directly and never passes through this proxy.
+  'hidden/admin_list_packs',
+  'hidden/admin_upsert_pack',
+  'hidden/admin_set_pack_active',
+  'hidden/admin_delete_pack',
+  'hidden/admin_list_scenes',
+  'hidden/admin_list_scene_items',
+  'hidden/admin_update_scene',
+  'hidden/admin_set_scene_active',
+  'hidden/admin_delete_scene',
+  'hidden/admin_list_levels',
+  'hidden/admin_upsert_level',
+  'hidden/admin_delete_level',
+  'hidden/admin_ingest_begin',
+  'hidden/admin_ingest_scene',
+  'hidden/admin_publish_bundle',
   // Refer and Earn — admin only. get_status/redeem are app-only, and
   // referral/resolve_code is deliberately public (the /r/<code> landing page
   // calls it with no session), so neither belongs in this allowlist.
