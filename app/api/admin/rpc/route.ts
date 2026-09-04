@@ -176,6 +176,27 @@ const ALLOWED_ADMIN_RPC_IDS = new Set([
   'hidden/admin_ingest_begin',
   'hidden/admin_ingest_scene',
   'hidden/admin_publish_bundle',
+  // One Stroke — chapters, the compile-and-store studio, ladder placement,
+  // pool tags and the daily schedule. The player-facing draw/get_* and the
+  // session RPCs are app-only.
+  'draw/admin_list_chapters',
+  'draw/admin_upsert_chapter',
+  'draw/admin_set_chapter_active',
+  'draw/admin_delete_chapter',
+  'draw/admin_list_levels',
+  'draw/admin_set_level',
+  'draw/admin_remove_level',
+  'draw/admin_reorder_levels',
+  'draw/admin_compile',
+  'draw/admin_ingest_puzzle',
+  'draw/admin_recompile_puzzle',
+  'draw/admin_list_puzzles',
+  'draw/admin_update_puzzle',
+  'draw/admin_set_puzzle_active',
+  'draw/admin_delete_puzzle',
+  'draw/admin_list_daily',
+  'draw/admin_set_daily',
+  'draw/admin_clear_daily',
   // Refer and Earn — admin only. get_status/redeem are app-only, and
   // referral/resolve_code is deliberately public (the /r/<code> landing page
   // calls it with no session), so neither belongs in this allowlist.
